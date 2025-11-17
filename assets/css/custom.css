@@ -1,0 +1,155 @@
+body {
+    background-color: #F9FAFB;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+.navbar-brand {
+    color: #4F46E5 !important;
+}
+
+.hero-section {
+    background: linear-gradient(45deg, #4F46E5, #6366F1);
+    padding: 6rem 0;
+}
+
+.btn-primary {
+    background-color: #4F46E5;
+    border-color: #4F46E5;
+    padding: 0.75rem 1.5rem;
+    border-radius: 0.5rem;
+}
+
+.btn-primary:hover {
+    background-color: #4338CA;
+    border-color: #4338CA;
+}
+
+.btn-outline-primary {
+    border-color: #4F46E5;
+    color: #4F46E5;
+    padding: 0.75rem 1.5rem;
+    border-radius: 0.5rem;
+}
+
+.btn-outline-primary:hover {
+    background-color: #4F46E5;
+    color: white;
+}
+
+.btn-light {
+    padding: 0.75rem 1.5rem;
+    border-radius: 0.5rem;
+}
+
+.card {
+    border: none;
+    border-radius: 0.5rem;
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+    transition: transform 0.2s ease-in-out;
+}
+
+.card:hover {
+    transform: translateY(-5px);
+}
+
+.feature-icon {
+    width: 64px;
+    height: 64px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #EEF2FF;
+    color: #4F46E5;
+    border-radius: 50%;
+}
+
+.feature-icon i {
+    width: 32px;
+    height: 32px;
+}
+
+/* Timetable Demo Styles */
+.timetable-container {
+    padding: 2rem;
+    background-color: #fff;
+    border-radius: 0.5rem;
+    box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+}
+
+.timetable-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+}
+
+.timetable-header h1 {
+    color: #111827;
+}
+
+.timetable-table {
+    border-radius: 0.5rem;
+    overflow: hidden;
+}
+
+.timetable-table th, .timetable-table td {
+    text-align: center;
+    vertical-align: middle;
+    padding: 1rem;
+    min-width: 120px;
+}
+
+.timetable-table thead th {
+    background-color: #EEF2FF;
+    color: #4338CA;
+    font-weight: bold;
+}
+
+.day-header {
+    background-color: #F9FAFB;
+    font-weight: bold;
+    width: 100px;
+}
+
+.timetable-cell {
+    background-color: #fff;
+    transition: background-color 0.2s;
+}
+
+.timetable-cell:hover {
+    background-color: #F3F4F6;
+}
+
+.timetable-cell strong {
+    display: block;
+    color: #4F46E5;
+}
+
+.timetable-cell span {
+    font-size: 0.875rem;
+    color: #6B7280;
+}
+
+.break-cell {
+    background-color: #F3F4F6;
+    font-style: italic;
+    color: #6B7280;
+}
+
+@media print {
+    body * {
+        visibility: hidden;
+    }
+    .printable-area, .printable-area * {
+        visibility: visible;
+    }
+    .printable-area {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+    }
+    .btn { 
+        display: none !important; 
+    }
+}
