@@ -153,3 +153,52 @@ body {
         display: none !important; 
     }
 }
+
+/* New Timetable Styles */
+.timetable-table {
+    border-collapse: separate;
+    border-spacing: 5px;
+}
+
+.time-col {
+    width: 100px;
+    font-weight: bold;
+    vertical-align: middle;
+}
+
+.timetable-cell-container {
+    padding: 2px !important;
+    background-color: #F9FAFB;
+}
+
+.timetable-cell {
+    border-radius: 8px;
+    padding: 12px 8px;
+    color: #111827;
+    height: 100%;
+    min-height: 80px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.timetable-cell:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.subject-name {
+    font-weight: bold;
+    font-size: 0.9rem;
+}
+
+.teacher-name {
+    font-size: 0.8rem;
+    opacity: 0.8;
+}
+
+.break-cell {
+    background-color: #F3F4F6;
+    border-radius: 8px;
+}

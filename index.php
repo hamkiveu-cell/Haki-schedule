@@ -1,48 +1,45 @@
+<?php session_start(); ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Haki Schedule</title>
-    <meta name="description" content="Built with Flatlogic Generator">
-    <meta name="keywords" content="timetable app, school scheduling, automated timetable, class schedule, teacher workload, subscription timetable, school administration, education tech, Haki schedule, Built with Flatlogic Generator">
-    <meta property="og:title" content="Haki Schedule">
-    <meta property="og:description" content="Built with Flatlogic Generator">
-    <meta property="og:image" content="">
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:image" content="">
-
+    <title>Haki Schedule - Automated Timetable Generator</title>
+    <meta name="description" content="Haki Schedule is a simple, elegant, and powerful automated timetable generator for educational institutions.">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.10.3/font/bootstrap-icons.min.css">
     <link rel="stylesheet" href="assets/css/custom.css?v=<?php echo time(); ?>">
-    <script src="https://unpkg.com/feather-icons"></script>
 </head>
 <body>
 
-    <nav class="navbar navbar-expand-lg navbar-light bg-white sticky-top">
+    <nav class="navbar navbar-expand-lg navbar-light bg-white sticky-top shadow-sm">
         <div class="container">
-            <a class="navbar-brand fw-bold" href="#">Haki Schedule</a>
+            <a class="navbar-brand fw-bold" href="/">Haki Schedule</a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
                 <span class="navbar-toggler-icon"></span>
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav ms-auto">
-                    <li class="nav-item">
-                        <a class="nav-link" href="#features">Features</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="#">Pricing</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/demo.php">Demo</a>
-                    </li>
-                </ul>
-                <ul class="navbar-nav ms-lg-3">
-                    <li class="nav-item">
-                        <a class="btn btn-outline-primary" href="#">Login</a>
-                    </li>
-                    <li class="nav-item ms-lg-2 mt-2 mt-lg-0">
-                        <a class="btn btn-primary" href="#">Sign Up</a>
-                    </li>
+                    <li class="nav-item"><a class="nav-link active" href="/">Home</a></li>
+                    <?php if (isset($_SESSION['user_id'])): ?>
+                        <li class="nav-item dropdown">
+                            <a class="nav-link dropdown-toggle" href="#" id="manageDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                Manage
+                            </a>
+                            <ul class="dropdown-menu" aria-labelledby="manageDropdown">
+                                <li><a class="dropdown-item" href="/admin_classes.php">Classes</a></li>
+                                <li><a class="dropdown-item" href="/admin_subjects.php">Subjects</a></li>
+                                <li><a class="dropdown-item" href="/admin_teachers.php">Teachers</a></li>
+                                <li><a class="dropdown-item" href="/admin_workloads.php">Workloads</a></li>
+                            </ul>
+                        </li>
+                        <li class="nav-item"><a class="nav-link" href="/timetable.php">Timetable</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/logout.php">Logout</a></li>
+                    <?php else: ?>
+                        <li class="nav-item"><a class="nav-link" href="/demo.php">Demo</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/login.php">Login</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/register.php">Register</a></li>
+                    <?php endif; ?>
                 </ul>
             </div>
         </div>
