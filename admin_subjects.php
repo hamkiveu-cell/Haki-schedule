@@ -24,29 +24,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_id'])) {
 // Handle POST request to add or update a subject
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['subject_name'])) {
     $subjectName = trim($_POST['subject_name']);
+    $lessons_per_week = filter_input(INPUT_POST, 'lessons_per_week', FILTER_VALIDATE_INT, ['options' => ['default' => 1, 'min_range' => 1]]);
     $has_double_lesson = isset($_POST['has_double_lesson']) ? 1 : 0;
     $is_elective = isset($_POST['is_elective']) ? 1 : 0;
+    $elective_group_id = !empty($_POST['elective_group_id']) ? $_POST['elective_group_id'] : null;
     $subject_id = $_POST['subject_id'] ?? null;
 
     if (empty($subjectName)) {
         $error = 'Subject name cannot be empty.';
     } else {
-        try {
-            if ($subject_id) {
-                // Update existing subject
-                $stmt = $pdo->prepare("UPDATE subjects SET name = ?, has_double_lesson = ?, is_elective = ? WHERE id = ? AND school_id = ?");
-                $stmt->execute([$subjectName, $has_double_lesson, $is_elective, $subject_id, $school_id]);
-                $message = "Subject updated successfully!";
-            } else {
-                // Insert new subject
-                $stmt = $pdo->prepare("INSERT INTO subjects (name, has_double_lesson, is_elective, school_id) VALUES (?, ?, ?, ?)");
-                $stmt->execute([$subjectName, $has_double_lesson, $is_elective, $school_id]);
-                $message = "Subject created successfully!";
-            }
-        } catch (PDOException $e) {
-            if ($e->errorInfo[1] == 1062) { // Duplicate entry
-                $error = "Error: Subject '" . htmlspecialchars($subjectName) . "' already exists.";
-            } else {
+        // Check for duplicates before inserting/updating
+        $stmt = $pdo->prepare("SELECT id FROM subjects WHERE name = ? AND school_id = ? AND id != ?");
+        $stmt->execute([$subjectName, $school_id, $subject_id ?? 0]);
+        if ($stmt->fetch()) {
+            $error = "Error: Subject '" . htmlspecialchars($subjectName) . "' already exists.";
+        } else {
+            try {
+                if ($subject_id) {
+                    // Update existing subject
+                    $stmt = $pdo->prepare("UPDATE subjects SET name = ?, lessons_per_week = ?, has_double_lesson = ?, is_elective = ?, elective_group_id = ? WHERE id = ? AND school_id = ?");
+                    $stmt->execute([$subjectName, $lessons_per_week, $has_double_lesson, $is_elective, $elective_group_id, $subject_id, $school_id]);
+                    $message = "Subject updated successfully!";
+                } else {
+                    // Insert new subject
+                    $stmt = $pdo->prepare("INSERT INTO subjects (name, lessons_per_week, has_double_lesson, is_elective, elective_group_id, school_id) VALUES (?, ?, ?, ?, ?, ?)");
+                    $stmt->execute([$subjectName, $lessons_per_week, $has_double_lesson, $is_elective, $elective_group_id, $school_id]);
+                    $message = "Subject created successfully!";
+                }
+            } catch (PDOException $e) {
                 $error = 'Database error: ' . $e->getMessage();
             }
         }
@@ -68,11 +73,21 @@ if (isset($_GET['edit_id'])) {
 // Fetch all subjects to display
 $subjects = [];
 try {
-    $subjects_stmt = $pdo->prepare("SELECT * FROM subjects WHERE school_id = ? ORDER BY name ASC");
+    $subjects_stmt = $pdo->prepare("SELECT s.*, eg.name as elective_group_name FROM subjects s LEFT JOIN elective_groups eg ON s.elective_group_id = eg.id WHERE s.school_id = ? ORDER BY s.name ASC");
     $subjects_stmt->execute([$school_id]);
     $subjects = $subjects_stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
     $error = 'Database error: ' . $e->getMessage();
+}
+
+// Fetch all elective groups for the dropdown
+$elective_groups = [];
+try {
+    $stmt = $pdo->prepare("SELECT * FROM elective_groups WHERE school_id = ? ORDER BY name ASC");
+    $stmt->execute([$school_id]);
+    $elective_groups = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+    $error = 'Database error while fetching elective groups: ' . $e->getMessage();
 }
 
 ?>
@@ -145,6 +160,10 @@ try {
                                     <label for="subject_name" class="form-label">Subject Name</label>
                                     <input type="text" class="form-control" id="subject_name" name="subject_name" value="<?php echo htmlspecialchars($editing_subject['name'] ?? ''); ?>" placeholder="e.g., Mathematics" required>
                                 </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="lessons_per_week" class="form-label">Lessons per Week</label>
+                                    <input type="number" class="form-control" id="lessons_per_week" name="lessons_per_week" value="<?php echo htmlspecialchars($editing_subject['lessons_per_week'] ?? '1'); ?>" min="1" required>
+                                </div>
                             </div>
                             <div class="mb-3 form-check">
                                 <input type="checkbox" class="form-check-input" id="has_double_lesson" name="has_double_lesson" value="1" <?php echo !empty($editing_subject['has_double_lesson']) ? 'checked' : ''; ?>>
@@ -153,6 +172,17 @@ try {
                             <div class="mb-3 form-check">
                                 <input type="checkbox" class="form-check-input" id="is_elective" name="is_elective" value="1" <?php echo !empty($editing_subject['is_elective']) ? 'checked' : ''; ?>>
                                 <label class="form-check-label" for="is_elective">Is Elective</label>
+                            </div>
+                            <div class="mb-3">
+                                <label for="elective_group_id" class="form-label">Elective Group (Optional)</label>
+                                <select class="form-select" id="elective_group_id" name="elective_group_id">
+                                    <option value="">None</option>
+                                    <?php foreach ($elective_groups as $group): ?>
+                                        <option value="<?php echo $group['id']; ?>" <?php echo (isset($editing_subject['elective_group_id']) && $editing_subject['elective_group_id'] == $group['id']) ? 'selected' : ''; ?>>
+                                            <?php echo htmlspecialchars($group['name']); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
                             </div>
                             <button type="submit" class="btn btn-primary"><?php echo $editing_subject ? 'Update Subject' : 'Create Subject'; ?></button>
                             <?php if ($editing_subject): ?>
@@ -174,8 +204,10 @@ try {
                                     <thead>
                                         <tr>
                                             <th>Name</th>
+                                            <th>Lessons / Week</th>
                                             <th>Double Lesson</th>
                                             <th>Is Elective</th>
+                                            <th>Elective Group</th>
                                             <th>Actions</th>
                                         </tr>
                                     </thead>
@@ -183,8 +215,10 @@ try {
                                         <?php foreach ($subjects as $subject): ?>
                                             <tr>
                                                 <td><?php echo htmlspecialchars($subject['name']); ?></td>
+                                                <td><?php echo htmlspecialchars($subject['lessons_per_week']); ?></td>
                                                 <td><?php echo $subject['has_double_lesson'] ? 'Yes' : 'No'; ?></td>
                                                 <td><?php echo $subject['is_elective'] ? 'Yes' : 'No'; ?></td>
+                                                <td><?php echo htmlspecialchars($subject['elective_group_name'] ?? 'N/A'); ?></td>
                                                 <td>
                                                     <a href="?edit_id=<?php echo $subject['id']; ?>" class="btn btn-sm btn-outline-primary">Edit</a>
                                                     <form action="admin_subjects.php" method="POST" class="d-inline" onsubmit="return confirm('Are you sure you want to delete this subject?');">

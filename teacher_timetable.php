@@ -178,7 +178,7 @@ foreach ($teacher_schedule_raw as $lesson) {
                     <select name="teacher_id" id="teacher_id" class="form-select" onchange="this.form.submit()">
                         <option value="">-- Select a Teacher --</option>
                         <?php foreach ($teachers as $teacher): ?>
-                            <option value="<?php echo $teacher['id']; ?>" <?php echo ($selected_teacher_id == $teacher['id']['id']) ? 'selected' : ''; ?>>
+                            <option value="<?php echo $teacher['id']; ?>" <?php echo ($selected_teacher_id == $teacher['id']) ? 'selected' : ''; ?>>
                                 <?php echo htmlspecialchars($teacher['name']); ?>
                             </option>
                         <?php endforeach; ?>

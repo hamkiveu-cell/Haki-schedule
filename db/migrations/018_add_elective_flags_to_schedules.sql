@@ -1,0 +1,1 @@
+ALTER TABLE schedules ADD COLUMN is_elective BOOLEAN NOT NULL DEFAULT 0, ADD COLUMN is_horizontal_elective BOOLEAN NOT NULL DEFAULT 0;

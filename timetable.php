@@ -13,7 +13,8 @@ function get_workloads($pdo) {
             s.id as subject_id,
             s.name as subject_name,
             s.has_double_lesson,
-            s.elective_group,
+            s.elective_group_id,
+            eg.name as elective_group_name,
             t.id as teacher_id,
             t.name as teacher_name,
             w.lessons_per_week
@@ -21,6 +22,7 @@ function get_workloads($pdo) {
         JOIN classes c ON w.class_id = c.id
         JOIN subjects s ON w.subject_id = s.id
         JOIN teachers t ON w.teacher_id = t.id
+        LEFT JOIN elective_groups eg ON s.elective_group_id = eg.id
         ORDER BY c.name, s.name
     ");
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -45,7 +47,7 @@ function get_grade_from_class_name($class_name) {
 // --- Scoring and Placement Logic ---
 function find_best_slot_for_lesson($lesson, $is_double, &$class_timetables, &$teacher_timetables, $all_class_ids, $days_of_week, $periods_per_day) {
     $best_slot = null;
-    $highest_score = -1;
+    $highest_score = -1000;
 
     $class_id = $lesson['type'] === 'horizontal_elective' ? null : $lesson['class_id'];
     $teachers_in_lesson = array_unique(array_column($lesson['component_lessons'], 'teacher_id'));
@@ -58,7 +60,7 @@ function find_best_slot_for_lesson($lesson, $is_double, &$class_timetables, &$te
             // 1. Check basic availability
             $slot_available = true;
             if ($is_double) {
-                if ($period + 1 >= $periods_per_day) continue;
+                if ($period + 1 >= $periods_per_day) continue; // Not enough space for a double
                 foreach ($class_ids_in_lesson as $cid) {
                     if (isset($class_timetables[$cid][$day][$period]) || isset($class_timetables[$cid][$day][$period + 1])) {
                         $slot_available = false; break;
@@ -86,28 +88,55 @@ function find_best_slot_for_lesson($lesson, $is_double, &$class_timetables, &$te
             if (!$slot_available) continue;
 
             // 2. Apply scoring rules
+            // A. Penalize placing the same subject on the same day
             foreach ($class_ids_in_lesson as $cid) {
+                $lessons_on_day = 0;
                 for ($p = 0; $p < $periods_per_day; $p++) {
                     if (isset($class_timetables[$cid][$day][$p]) && $class_timetables[$cid][$day][$p]['subject_name'] === $lesson['display_name']) {
-                        $current_score -= 50;
+                        $lessons_on_day++;
+                    }
+                }
+                $current_score -= $lessons_on_day * 50; // Heavy penalty for each existing lesson of same subject
+            }
+
+            // B. Penalize creating gaps for teachers and classes
+            foreach ($teachers_in_lesson as $teacher_id) {
+                // Check for gap before the lesson
+                if ($period > 0 && !isset($teacher_timetables[$teacher_id][$day][$period - 1])) {
+                     if (isset($teacher_timetables[$teacher_id][$day][$period - 2])) $current_score -= 25; // Gap of 1
+                }
+                // Check for gap after the lesson
+                $after_period = $is_double ? $period + 2 : $period + 1;
+                if ($after_period < $periods_per_day && !isset($teacher_timetables[$teacher_id][$day][$after_period])) {
+                    if (isset($teacher_timetables[$teacher_id][$day][$after_period + 1])) $current_score -= 25; // Gap of 1
+                }
+            }
+            foreach ($class_ids_in_lesson as $cid) {
+                 if ($period > 0 && !isset($class_timetables[$cid][$day][$period - 1])) {
+                     if (isset($class_timetables[$cid][$day][$period - 2])) $current_score -= 10;
+                }
+                $after_period = $is_double ? $period + 2 : $period + 1;
+                if ($after_period < $periods_per_day && !isset($class_timetables[$cid][$day][$after_period])) {
+                    if (isset($class_timetables[$cid][$day][$after_period + 1])) $current_score -= 10;
+                }
+            }
+
+            // C. Penalize placing a double lesson of the same subject in parallel with another class
+            if ($is_double) {
+                $subject_name_to_check = $lesson['display_name'];
+                foreach ($all_class_ids as $cid) {
+                    if (in_array($cid, $class_ids_in_lesson)) continue; // Don't check against itself
+                    if (isset($class_timetables[$cid][$day][$period]) && $class_timetables[$cid][$day][$period]['is_double'] && $class_timetables[$cid][$day][$period]['subject_name'] === $subject_name_to_check) {
+                        $current_score -= 200; // Very high penalty for parallel doubles of same subject
+                        break;
                     }
                 }
             }
 
-            foreach ($teachers_in_lesson as $teacher_id) {
-                if ($period > 0 && isset($teacher_timetables[$teacher_id][$day][$period - 1])) $current_score -= 15;
-                $after_period = $is_double ? $period + 2 : $period + 1;
-                if ($after_period < $periods_per_day && isset($teacher_timetables[$teacher_id][$day][$after_period])) $current_score -= 15;
-            }
-
+            // D. Prefer ends of day for double lessons
             if ($is_double) {
-                $subject_name_to_check = $lesson['display_name'];
-                foreach ($all_class_ids as $cid) {
-                    if (in_array($cid, $class_ids_in_lesson)) continue;
-                    if (isset($class_timetables[$cid][$day][$period]) && $class_timetables[$cid][$day][$period]['is_double'] && $class_timetables[$cid][$day][$period]['subject_name'] === $subject_name_to_check) {
-                        $current_score -= 500;
-                        break;
-                    }
+                if ($period == 0 || $period + 1 == $periods_per_day -1) {
+                    $current_score += 10;
                 }
             }
 
@@ -117,8 +146,6 @@ function find_best_slot_for_lesson($lesson, $is_double, &$class_timetables, &$te
             }
         }
     }
-    return $best_slot;
-}
 
 // --- Main Scheduling Engine ---
 function generate_timetable($workloads, $classes, $days_of_week, $periods_per_day) {
@@ -129,50 +156,47 @@ function generate_timetable($workloads, $classes, $days_of_week, $periods_per_da
     $teacher_timetables = [];
 
     // --- Lesson Preparation ---
-    $horizontal_elective_doubles = [];
-    $horizontal_elective_singles = [];
-    $other_workloads = [];
+    $all_lessons = [];
     $workloads_by_grade_and_elective_group = [];
 
+    // 1. Group horizontal electives
     foreach ($workloads as $workload) {
-        if (!empty($workload['elective_group'])) {
+        if (!empty($workload['elective_group_id'])) {
             $grade_name = get_grade_from_class_name($workload['class_name']);
-            $workloads_by_grade_and_elective_group[$grade_name][$workload['elective_group']][] = $workload;
+            $workloads_by_grade_and_elective_group[$grade_name][$workload['elective_group_id']][] = $workload;
         } else {
-            $other_workloads[] = $workload;
+            // This will be handled in the next step
         }
     }
 
+    $processed_workload_ids = [];
     foreach ($workloads_by_grade_and_elective_group as $grade_name => $elective_groups) {
-        foreach ($elective_groups as $elective_group_name => $group_workloads) {
+        foreach ($elective_groups as $elective_group_id => $group_workloads) {
             $participating_class_ids = array_unique(array_column($group_workloads, 'class_id'));
             if (count($participating_class_ids) > 1) {
                 $first = $group_workloads[0];
                 $block = [
                     'type' => 'horizontal_elective',
-                    'display_name' => $elective_group_name,
+                    'display_name' => $first['elective_group_name'],
                     'participating_class_ids' => $participating_class_ids,
                     'lessons_per_week' => $first['lessons_per_week'],
                     'has_double_lesson' => $first['has_double_lesson'],
-                    'component_lessons' => $group_workloads
+                    'component_lessons' => $group_workloads,
+                    'priority' => 4 // Highest priority
                 ];
-
-                if ($block['has_double_lesson'] && $block['lessons_per_week'] >= 2) {
-                    $horizontal_elective_doubles[] = $block;
-                    for ($i = 0; $i < $block['lessons_per_week'] - 2; $i++) $horizontal_elective_singles[] = $block;
-                } else {
-                    for ($i = 0; $i < $block['lessons_per_week']; $i++) $horizontal_elective_singles[] = $block;
-                }
-            } else {
-                foreach($group_workloads as $workload) $other_workloads[] = $workload;
+                $all_lessons[] = $block;
+                foreach($group_workloads as $w) $processed_workload_ids[] = $w['id'];
             }
         }
     }
-    
-    $double_lessons = [];
-    $single_lessons = [];
+
+    // 2. Group remaining lessons (single, elective, and normal doubles)
+    $remaining_workloads = array_filter($workloads, function($w) use ($processed_workload_ids) {
+        return !in_array($w['id'], $processed_workload_ids);
+    });
+
     $workloads_by_class = [];
-    foreach ($other_workloads as $workload) {
+    foreach ($remaining_workloads as $workload) {
         $workloads_by_class[$workload['class_id']][] = $workload;
     }
 
@@ -180,92 +204,104 @@ function generate_timetable($workloads, $classes, $days_of_week, $periods_per_da
         $elective_groups = [];
         $individual_lessons = [];
         foreach ($class_workloads as $workload) {
-            if (!empty($workload['elective_group'])) {
-                $elective_groups[$workload['elective_group']][] = $workload;
+            if (!empty($workload['elective_group_id'])) {
+                $elective_groups[$workload['elective_group_id']][] = $workload;
             } else {
                 $individual_lessons[] = $workload;
             }
         }
 
-        foreach ($elective_groups as $group_name => $group_workloads) {
+        foreach ($elective_groups as $group_id => $group_workloads) {
             $first = $group_workloads[0];
-            $block = [
-                'type' => 'elective', 'class_id' => $class_id, 'display_name' => $group_name,
+            $all_lessons[] = [
+                'type' => 'elective', 'class_id' => $class_id, 'display_name' => $first['elective_group_name'],
                 'lessons_per_week' => $first['lessons_per_week'], 'has_double_lesson' => $first['has_double_lesson'],
-                'component_lessons' => $group_workloads
+                'component_lessons' => $group_workloads,
+                'priority' => 3
             ];
-            if ($block['has_double_lesson'] && $block['lessons_per_week'] >= 2) {
-                $double_lessons[] = $block;
-                for ($i = 0; $i < $block['lessons_per_week'] - 2; $i++) $single_lessons[] = $block;
-            } else {
-                for ($i = 0; $i < $block['lessons_per_week']; $i++) $single_lessons[] = $block;
-            }
         }
 
         foreach ($individual_lessons as $workload) {
-            $lesson = [
+            $all_lessons[] = [
                 'type' => 'single', 'class_id' => $workload['class_id'], 'display_name' => $workload['subject_name'],
                 'lessons_per_week' => $workload['lessons_per_week'], 'has_double_lesson' => $workload['has_double_lesson'],
-                'component_lessons' => [$workload]
+                'component_lessons' => [$workload],
+                'priority' => $workload['has_double_lesson'] ? 2 : 1
             ];
-            if ($lesson['has_double_lesson'] && $lesson['lessons_per_week'] >= 2) {
-                $double_lessons[] = $lesson;
-                for ($i = 0; $i < $lesson['lessons_per_week'] - 2; $i++) $single_lessons[] = $lesson;
-            } else {
-                for ($i = 0; $i < $lesson['lessons_per_week']; $i++) $single_lessons[] = $lesson;
-            }
         }
     }
 
+    // 3. Explode lessons into single and double instances
+    $final_lesson_list = [];
+    foreach ($all_lessons as $lesson_block) {
+        $num_doubles = 0;
+        $num_singles = $lesson_block['lessons_per_week'];
+        if ($lesson_block['has_double_lesson'] && $lesson_block['lessons_per_week'] >= 2) {
+            $num_doubles = 1;
+            $num_singles -= 2;
+        }
+        for ($i=0; $i < $num_doubles; $i++) {
+            $final_lesson_list[] = ['is_double' => true, 'lesson_details' => $lesson_block];
+        }
+        for ($i=0; $i < $num_singles; $i++) {
+            $final_lesson_list[] = ['is_double' => false, 'lesson_details' => $lesson_block];
+        }
+    }
+
+    // 4. Sort by priority (desc) and then shuffle to vary timetable
+    usort($final_lesson_list, function($a, $b) {
+        $prio_a = $a['lesson_details']['priority'];
+        $prio_b = $b['lesson_details']['priority'];
+        if ($prio_a != $prio_b) return $prio_b - $prio_a;
+        if ($a['is_double'] != $b['is_double']) return $b['is_double'] - $a['is_double'];
+        return rand(-1, 1);
+    });
+
     // --- Placement using Scoring ---
     $all_class_ids = array_column($classes, 'id');
-    $all_lessons_in_order = [
-        'horizontal_doubles' => $horizontal_elective_doubles, 'doubles' => $double_lessons,
-        'horizontal_singles' => $horizontal_elective_singles, 'singles' => $single_lessons
-    ];
 
-    foreach ($all_lessons_in_order as $type => $lessons) {
-        shuffle($lessons);
-        foreach ($lessons as $lesson) {
-            $is_double = ($type === 'doubles' || $type === 'horizontal_doubles');
-            $best_slot = find_best_slot_for_lesson($lesson, $is_double, $class_timetables, $teacher_timetables, $all_class_ids, $days_of_week, $periods_per_day);
+    foreach ($final_lesson_list as $lesson_item) {
+        $lesson = $lesson_item['lesson_details'];
+        $is_double = $lesson_item['is_double'];
+        
+        $best_slot = find_best_slot_for_lesson($lesson, $is_double, $class_timetables, $teacher_timetables, $all_class_ids, $days_of_week, $periods_per_day);
 
-            if ($best_slot) {
-                $day = $best_slot['day'];
-                $period = $best_slot['period'];
-                $class_ids_to_place = ($lesson['type'] === 'horizontal_elective') ? $lesson['participating_class_ids'] : [$lesson['class_id']];
-                $teachers_to_place = array_unique(array_column($lesson['component_lessons'], 'teacher_id'));
+        if ($best_slot) {
+            $day = $best_slot['day'];
+            $period = $best_slot['period'];
+            $class_ids_to_place = ($lesson['type'] === 'horizontal_elective') ? $lesson['participating_class_ids'] : [$lesson['class_id']];
+            $teachers_to_place = array_unique(array_column($lesson['component_lessons'], 'teacher_id'));
 
-                $subject_id = null;
-                $teacher_id = null;
-                if ($lesson['type'] === 'single' && count($lesson['component_lessons']) === 1) {
-                    $subject_id = $lesson['component_lessons'][0]['subject_id'];
-                    $teacher_id = $lesson['component_lessons'][0]['teacher_id'];
+            $subject_id = null;
+            $teacher_id = null;
+            // For single-teacher, single-subject lessons, store the IDs directly
+            if (count($lesson['component_lessons']) === 1) {
+                $subject_id = $lesson['component_lessons'][0]['subject_id'];
+                $teacher_id = $lesson['component_lessons'][0]['teacher_id'];
+            }
+
+            $lesson_info = [
+                'subject_id' => $subject_id,
+                'teacher_id' => $teacher_id,
+                'subject_name' => $lesson['display_name'],
+                'teacher_name' => count($teachers_to_place) > 1 ? 'Multiple' : $lesson['component_lessons'][0]['teacher_name'],
+                'is_double' => $is_double,
+                'is_elective' => $lesson['type'] === 'elective',
+                'is_horizontal_elective' => $lesson['type'] === 'horizontal_elective'
+            ];
+
+            if ($is_double) {
+                foreach ($class_ids_to_place as $cid) {
+                    $class_timetables[$cid][$day][$period] = $lesson_info;
+                    $class_timetables[$cid][$day][$period + 1] = $lesson_info;
                 }
-
-                $lesson_info = [
-                    'subject_id' => $subject_id,
-                    'teacher_id' => $teacher_id,
-                    'subject_name' => $lesson['display_name'],
-                    'teacher_name' => count($teachers_to_place) > 1 ? 'Multiple' : $lesson['component_lessons'][0]['teacher_name'],
-                    'is_double' => $is_double,
-                    'is_elective' => $lesson['type'] === 'elective',
-                    'is_horizontal_elective' => $lesson['type'] === 'horizontal_elective'
-                ];
-
-                if ($is_double) {
-                    foreach ($class_ids_to_place as $cid) {
-                        $class_timetables[$cid][$day][$period] = $lesson_info;
-                        $class_timetables[$cid][$day][$period + 1] = $lesson_info;
-                    }
-                    foreach ($teachers_to_place as $tid) {
-                        $teacher_timetables[$tid][$day][$period] = true;
-                        $teacher_timetables[$tid][$day][$period + 1] = true;
-                    }
-                } else {
-                    foreach ($class_ids_to_place as $cid) $class_timetables[$cid][$day][$period] = $lesson_info;
-                    foreach ($teachers_to_place as $tid) $teacher_timetables[$tid][$day][$period] = true;
+                foreach ($teachers_to_place as $tid) {
+                    $teacher_timetables[$tid][$day][$period] = true;
+                    $teacher_timetables[$tid][$day][$period + 1] = true;
                 }
+            } else {
+                foreach ($class_ids_to_place as $cid) $class_timetables[$cid][$day][$period] = $lesson_info;
+                foreach ($teachers_to_place as $tid) $teacher_timetables[$tid][$day][$period] = true;
             }
         }
     }
@@ -296,9 +332,9 @@ function save_timetable($pdo, $class_timetables, $timeslots) {
                         ':teacher_id' => $lesson['teacher_id'],
                         ':lesson_display_name' => $lesson['subject_name'],
                         ':teacher_display_name' => $lesson['teacher_name'],
-                        ':is_double' => $lesson['is_double'],
-                        ':is_elective' => $lesson['is_elective'],
-                        ':is_horizontal_elective' => $lesson['is_horizontal_elective']
+                        ':is_double' => (int)$lesson['is_double'],
+                        ':is_elective' => (int)$lesson['is_elective'],
+                        ':is_horizontal_elective' => (int)$lesson['is_horizontal_elective']
                     ]);
                 }
             }

@@ -1,0 +1,1 @@
+ALTER TABLE subjects ADD COLUMN lessons_per_week INT NOT NULL DEFAULT 1;

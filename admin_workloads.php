@@ -92,13 +92,13 @@ try {
 $workloads = [];
 try {
     $workloads_stmt = $pdo->prepare("
-        SELECT w.id, c.name as class_name, s.name as subject_name, t.name as teacher_name, w.lessons_per_week, w.created_at, w.class_id, w.subject_id, w.teacher_id
+        SELECT w.id, c.name as class_name, s.name as subject_name, t.name as teacher_name, w.lessons_per_week, w.class_id, w.subject_id, w.teacher_id
         FROM workloads w
         JOIN classes c ON w.class_id = c.id
         JOIN subjects s ON w.subject_id = s.id
         JOIN teachers t ON w.teacher_id = t.id
         WHERE w.school_id = ?
-        ORDER BY w.created_at DESC
+        ORDER BY c.name, s.name, t.name
     ");
     $workloads_stmt->execute([$school_id]);
     $workloads = $workloads_stmt->fetchAll(PDO::FETCH_ASSOC);

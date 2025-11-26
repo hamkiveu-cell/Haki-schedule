@@ -1,0 +1,1 @@
+ALTER TABLE schedules ADD COLUMN day_of_week INT NOT NULL AFTER class_id;

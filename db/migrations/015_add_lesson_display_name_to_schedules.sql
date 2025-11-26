@@ -1,0 +1,1 @@
+ALTER TABLE `schedules` ADD `lesson_display_name` VARCHAR(255);
