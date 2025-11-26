@@ -74,9 +74,11 @@ try {
                                 <li><a class="dropdown-item" href="/admin_subjects.php">Subjects</a></li>
                                 <li><a class="dropdown-item active" href="/admin_teachers.php">Teachers</a></li>
                                 <li><a class="dropdown-item" href="/admin_workloads.php">Workloads</a></li>
+                                <li><a class="dropdown-item" href="/admin_timeslots.php">Timeslots</a></li>
                             </ul>
                         </li>
-                        <li class="nav-item"><a class="nav-link" href="/timetable.php">Timetable</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/timetable.php">Class Timetable</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/teacher_timetable.php">Teacher Timetable</a></li>
                         <li class="nav-item"><a class="nav-link" href="/logout.php">Logout</a></li>
                     <?php else: ?>
                         <li class="nav-item"><a class="nav-link" href="/demo.php">Demo</a></li>
