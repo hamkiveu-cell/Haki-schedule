@@ -147,6 +147,9 @@ function find_best_slot_for_lesson($lesson, $is_double, &$class_timetables, &$te
         }
     }
 
+    return $best_slot;
+}
+
 // --- Main Scheduling Engine ---
 function generate_timetable($workloads, $classes, $days_of_week, $periods_per_day) {
     $class_timetables = [];
