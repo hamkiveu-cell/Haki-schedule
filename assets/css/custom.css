@@ -202,3 +202,15 @@ body {
     background-color: #F3F4F6;
     border-radius: 8px;
 }
+
+.bg-light-blue {
+    background-color: #E0E7FF;
+}
+
+.bg-light-green {
+    background-color: #e0f2e9;
+}
+
+.bg-light-purple {
+    background-color: #e9e7f5;
+}

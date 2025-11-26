@@ -1,296 +1,345 @@
 <?php
-require_once __DIR__ . '/includes/auth_check.php';
-require_once __DIR__ . '/db/config.php';
+session_start();
+require_once 'includes/auth_check.php';
+require_once 'db/config.php';
 
-// --- Timetable Generation Logic V3 (with Backtracking) ---
+// --- Configuration ---
+define('DAYS_OF_WEEK', ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']);
+define('PERIODS_PER_DAY', 8);
 
-class Scheduler
-{
-    // Settings
-    private const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-    private const PERIODS_PER_DAY = 8;
-    private const BREAK_PERIODS = [2, 5];
+// --- Database Fetch ---
+function get_workloads($pdo) {
+    $stmt = $pdo->query("
+        SELECT 
+            w.id,
+            c.id as class_id,
+            c.name as class_name,
+            s.id as subject_id,
+            s.name as subject_name,
+            s.has_double_lesson,
+            s.elective_group,
+            t.id as teacher_id,
+            t.name as teacher_name,
+            w.lessons_per_week
+        FROM workloads w
+        JOIN classes c ON w.class_id = c.id
+        JOIN subjects s ON w.subject_id = s.id
+        JOIN teachers t ON w.teacher_id = t.id
+        ORDER BY c.name, s.name
+    ");
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
 
-    // Data
-    private $classes;
-    private $teachers;
-    private $workloads;
+function get_classes($pdo) {
+    return $pdo->query("SELECT * FROM classes ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
+}
 
-    // State
-    private $class_timetables;
-    private $teacher_timetables;
-    private $unplaced_lessons = [];
-    private $lessons_to_schedule;
-
-    public function __construct($classes, $teachers, $workloads)
-    {
-        $this->classes = $classes;
-        $this->teachers = $teachers;
-        $this->workloads = $workloads;
-
-        // Initialize empty timetables
-        foreach ($this->classes as $class) {
-            $this->class_timetables[$class['id']] = array_fill(0, count(self::DAYS_OF_WEEK), array_fill(0, self::PERIODS_PER_DAY, null));
-        }
-        foreach ($this->teachers as $teacher) {
-            $this->teacher_timetables[$teacher['id']] = array_fill(0, count(self::DAYS_OF_WEEK), array_fill(0, self::PERIODS_PER_DAY, null));
-        }
+// --- Helper Functions ---
+function get_grade_from_class_name($class_name) {
+    if (preg_match('/^(Grade\s+\d+)/i', $class_name, $matches)) {
+        return $matches[1];
     }
+    return $class_name;
+}
 
-    public function generate()
-    {
-        $this->lessons_to_schedule = $this->prepare_lessons();
-        $this->solve($this->lessons_to_schedule); // Run the solver
+// --- Scoring and Placement Logic ---
+function find_best_slot_for_lesson($lesson, $is_double, &$class_timetables, &$teacher_timetables, $all_class_ids) {
+    $best_slot = null;
+    $highest_score = -1;
 
-        return [
-            // The process always "succeeds" in running. Check unplaced_lessons for timetable completeness.
-            'success' => true,
-            'class_timetables' => $this->class_timetables,
-            'unplaced_lessons' => $this->unplaced_lessons,
-        ];
-    }
+    $class_id = $lesson['type'] === 'horizontal_elective' ? null : $lesson['class_id'];
+    $teachers_in_lesson = array_unique(array_column($lesson['component_lessons'], 'teacher_id'));
+    $class_ids_in_lesson = $lesson['type'] === 'horizontal_elective' ? $lesson['participating_class_ids'] : [$class_id];
 
-    private function prepare_lessons()
-    {
-        $lessons = [];
-        $electives = [];
+    for ($day = 0; $day < count(DAYS_OF_WEEK); $day++) {
+        for ($period = 0; $period < PERIODS_PER_DAY; $period++) {
+            $current_score = 100; // Base score for a valid slot
 
-        // Group electives
-        foreach ($this->workloads as $workload) {
-            if ($workload['elective_group']) {
-                $electives[$workload['elective_group']][] = $workload;
+            // 1. Check basic availability
+            $slot_available = true;
+            if ($is_double) {
+                if ($period + 1 >= PERIODS_PER_DAY) continue; // Not enough space for a double
+                foreach ($class_ids_in_lesson as $cid) {
+                    if (isset($class_timetables[$cid][$day][$period]) || isset($class_timetables[$cid][$day][$period + 1])) {
+                        $slot_available = false; break;
+                    }
+                }
+                if (!$slot_available) continue;
+                foreach ($teachers_in_lesson as $teacher_id) {
+                    if (isset($teacher_timetables[$teacher_id][$day][$period]) || isset($teacher_timetables[$teacher_id][$day][$period + 1])) {
+                        $slot_available = false; break;
+                    }
+                }
+            } else {
+                foreach ($class_ids_in_lesson as $cid) {
+                    if (isset($class_timetables[$cid][$day][$period])) {
+                        $slot_available = false; break;
+                    }
+                }
+                if (!$slot_available) continue;
+                foreach ($teachers_in_lesson as $teacher_id) {
+                    if (isset($teacher_timetables[$teacher_id][$day][$period])) {
+                        $slot_available = false; break;
+                    }
+                }
+            }
+            if (!$slot_available) continue;
+
+            // 2. Apply scoring rules for even distribution
+            foreach ($class_ids_in_lesson as $cid) {
+                // Penalty for same subject on the same day
+                for ($p = 0; $p < PERIODS_PER_DAY; $p++) {
+                    if (isset($class_timetables[$cid][$day][$p]) && $class_timetables[$cid][$day][$p]['subject_name'] === $lesson['display_name']) {
+                        $current_score -= 50;
+                    }
+                }
+            }
+
+            // Penalty for teacher back-to-back lessons
+            foreach ($teachers_in_lesson as $teacher_id) {
+                // Check period before
+                if ($period > 0 && isset($teacher_timetables[$teacher_id][$day][$period - 1])) {
+                    $current_score -= 15;
+                }
+                // Check period after
+                $after_period = $is_double ? $period + 2 : $period + 1;
+                if ($after_period < PERIODS_PER_DAY && isset($teacher_timetables[$teacher_id][$day][$after_period])) {
+                    $current_score -= 15;
+                }
+            }
+
+            // 3. New Penalty: Avoid scheduling double lessons of the same subject at the same time (resource conflict)
+            if ($is_double) {
+                $subject_name_to_check = $lesson['display_name'];
+                foreach ($all_class_ids as $cid) {
+                    // Skip the classes that are part of the current lesson being placed
+                    if (in_array($cid, $class_ids_in_lesson)) {
+                        continue;
+                    }
+
+                    if (isset($class_timetables[$cid][$day][$period])) {
+                        $conflicting_lesson = $class_timetables[$cid][$day][$period];
+                        // Check if it's a double lesson of the same subject.
+                        if ($conflicting_lesson['is_double'] && $conflicting_lesson['subject_name'] === $subject_name_to_check) {
+                            $current_score -= 500; // High penalty for resource conflict
+                            break; // Found a conflict, no need to check other classes
+                        }
+                    }
+                }
+            }
+
+            // 4. Compare with the highest score
+            if ($current_score > $highest_score) {
+                $highest_score = $current_score;
+                $best_slot = ['day' => $day, 'period' => $period];
             }
         }
+    }
+    return $best_slot;
+}
 
-        // Create elective lesson blocks
-        foreach ($electives as $group_name => $group_workloads) {
-            for ($i = 0; $i < $group_workloads[0]['lessons_per_week']; $i++) {
-                $lessons[] = [
-                    'is_elective' => true,
-                    'group_name' => $group_name,
-                    'workloads' => $group_workloads,
-                    'subject_name' => implode(' / ', array_map(fn($w) => $w['subject_name'], $group_workloads)),
-                    'teacher_name' => 'Elective Group',
-                    'subject_id' => $group_workloads[0]['subject_id'] // For color
+
+// --- Main Scheduling Engine ---
+function generate_timetable($workloads, $classes) {
+    $class_timetables = [];
+    foreach ($classes as $class) {
+        $class_timetables[$class['id']] = array_fill(0, count(DAYS_OF_WEEK), array_fill(0, PERIODS_PER_DAY, null));
+    }
+    $teacher_timetables = [];
+
+    // --- Lesson Preparation ---
+    $classes_by_grade = [];
+    foreach ($classes as $class) {
+        $grade_name = get_grade_from_class_name($class['name']);
+        $classes_by_grade[$grade_name][] = $class;
+    }
+
+    // Step 1: Identify horizontal electives and separate them from other workloads
+    $horizontal_elective_doubles = [];
+    $horizontal_elective_singles = [];
+    $other_workloads = [];
+    $workloads_by_grade_and_elective_group = [];
+
+    foreach ($workloads as $workload) {
+        if (!empty($workload['elective_group'])) {
+            $grade_name = get_grade_from_class_name($workload['class_name']);
+            $workloads_by_grade_and_elective_group[$grade_name][$workload['elective_group']][] = $workload;
+        } else {
+            $other_workloads[] = $workload;
+        }
+    }
+
+    foreach ($workloads_by_grade_and_elective_group as $grade_name => $elective_groups) {
+        foreach ($elective_groups as $elective_group_name => $group_workloads) {
+            $participating_class_ids = array_unique(array_column($group_workloads, 'class_id'));
+            // A horizontal elective involves more than one class
+            if (count($participating_class_ids) > 1) {
+                $first = $group_workloads[0];
+                $block = [
+                    'type' => 'horizontal_elective',
+                    'display_name' => $elective_group_name,
+                    'participating_class_ids' => $participating_class_ids,
+                    'lessons_per_week' => $first['lessons_per_week'],
+                    'has_double_lesson' => $first['has_double_lesson'],
+                    'component_lessons' => $group_workloads
                 ];
-            }
-        }
 
-        // Create double and single lessons
-        foreach ($this->workloads as $workload) {
-            if ($workload['elective_group']) continue;
-
-            $lessons_per_week = $workload['lessons_per_week'];
-            if ($workload['has_double_lesson']) {
-                if ($lessons_per_week >= 2) {
-                    $lessons[] = array_merge($workload, ['is_double' => true, 'duration' => 2]);
-                    $lessons_per_week -= 2;
+                if ($block['has_double_lesson'] && $block['lessons_per_week'] >= 2) {
+                    $horizontal_elective_doubles[] = $block; // Create one double lesson
+                    // Create remaining as single lessons
+                    for ($i = 0; $i < $block['lessons_per_week'] - 2; $i++) {
+                        $horizontal_elective_singles[] = $block;
+                    }
+                } else {
+                    // Create all as single lessons
+                    for ($i = 0; $i < $block['lessons_per_week']; $i++) {
+                        $horizontal_elective_singles[] = $block;
+                    }
                 }
-            }
-            for ($i = 0; $i < $lessons_per_week; $i++) {
-                $lessons[] = array_merge($workload, ['is_double' => false, 'duration' => 1]);
-            }
-        }
-        
-        // Sort lessons to prioritize more constrained ones (doubles and electives)
-        usort($lessons, function($a, $b) {
-            $a_score = ($a['is_elective'] ?? false) * 10 + ($a['is_double'] ?? false) * 5;
-            $b_score = ($b['is_elective'] ?? false) * 10 + ($b['is_double'] ?? false) * 5;
-            return $b_score <=> $a_score;
-        });
-
-        return $lessons;
-    }
-
-    private function solve(&$lessons)
-    {
-        if (empty($lessons)) {
-            return true; // Success: all lessons have been scheduled
-        }
-
-        $lesson = array_pop($lessons); // Get the next lesson to try placing
-        $possible_slots = $this->get_possible_slots($lesson);
-        shuffle($possible_slots);
-
-        foreach ($possible_slots as $slot) {
-            $this->place_lesson($lesson, $slot);
-
-            if ($this->solve($lessons)) {
-                return true; // Found a valid solution for the rest of the lessons
-            }
-
-            // Backtrack
-            $this->unplace_lesson($lesson, $slot);
-        }
-
-        // If we get here, no slot worked for the current lesson.
-        $this->unplaced_lessons[] = $lesson; // Record as unplaced
-        
-        // BUG FIX: The line below caused an infinite recursion and server crash.
-        // It has been removed. By returning false, we signal the parent to backtrack.
-        return false;
-    }
-
-    private function get_possible_slots($lesson)
-    {
-        $slots = [];
-        for ($day = 0; $day < count(self::DAYS_OF_WEEK); $day++) {
-            for ($period = 0; $period < self::PERIODS_PER_DAY; $period++) {
-                $slot = ['day' => $day, 'period' => $period];
-                if ($this->is_slot_valid($lesson, $slot)) {
-                    $slots[] = $slot;
+            } else {
+                // Not a horizontal elective, add back to the pool of other workloads
+                foreach($group_workloads as $workload) {
+                    $other_workloads[] = $workload;
                 }
             }
         }
-        return $slots;
+    }
+    
+    // Step 2: Process remaining workloads (regular subjects and single-class electives)
+    $double_lessons = [];
+    $single_lessons = [];
+    $workloads_by_class = [];
+    foreach ($other_workloads as $workload) {
+        $workloads_by_class[$workload['class_id']][] = $workload;
     }
 
-    private function is_slot_valid($lesson, $slot)
-    {
-        $day = $slot['day'];
-        $start_period = $slot['period'];
-        $duration = $lesson['duration'] ?? 1;
-
-        // Check if slot is a break
-        for ($p = 0; $p < $duration; $p++) {
-            $current_period = $start_period + $p;
-            if ($current_period >= self::PERIODS_PER_DAY || in_array($current_period, self::BREAK_PERIODS)) {
-                return false; // Slot is out of bounds or a break
+    foreach ($workloads_by_class as $class_id => $class_workloads) {
+        $elective_groups = [];
+        $individual_lessons = [];
+        // Separate single-class electives from individual subjects
+        foreach ($class_workloads as $workload) {
+            if (!empty($workload['elective_group'])) {
+                $elective_groups[$workload['elective_group']][] = $workload;
+            } else {
+                $individual_lessons[] = $workload;
             }
         }
 
-        if ($lesson['is_elective']) {
-            // Check all classes and teachers in the elective group
-            foreach ($lesson['workloads'] as $workload) {
-                if (!$this->check_resource_availability($workload['class_id'], $workload['teacher_id'], $day, $start_period, $duration)) {
-                    return false;
+        // Process single-class elective groups
+        foreach ($elective_groups as $group_name => $group_workloads) {
+            $first = $group_workloads[0];
+            $block = [
+                'type' => 'elective',
+                'class_id' => $class_id,
+                'display_name' => $group_name,
+                'lessons_per_week' => $first['lessons_per_week'],
+                'has_double_lesson' => $first['has_double_lesson'],
+                'component_lessons' => $group_workloads
+            ];
+            
+            if ($block['has_double_lesson'] && $block['lessons_per_week'] >= 2) {
+                $double_lessons[] = $block; // One double lesson
+                // Remaining are single lessons
+                for ($i = 0; $i < $block['lessons_per_week'] - 2; $i++) {
+                    $single_lessons[] = $block;
+                }
+            } else {
+                // All are single lessons
+                for ($i = 0; $i < $block['lessons_per_week']; $i++) {
+                    $single_lessons[] = $block;
                 }
             }
-        } else {
-            // Check for single/double lesson
-            if (!$this->check_resource_availability($lesson['class_id'], $lesson['teacher_id'], $day, $start_period, $duration)) {
-                return false;
-            }
-            // ** STRICT DISTRIBUTION RULE **
-            $lessons_on_day = 0;
-            foreach ($this->class_timetables[$lesson['class_id']][$day] as $p) {
-                if ($p && $p['subject_id'] === $lesson['subject_id']) {
-                    $lessons_on_day++;
+        }
+
+        // Process individual subjects
+        foreach ($individual_lessons as $workload) {
+            $lesson = [
+                'type' => 'single',
+                'class_id' => $workload['class_id'],
+                'display_name' => $workload['subject_name'],
+                'lessons_per_week' => $workload['lessons_per_week'],
+                'has_double_lesson' => $workload['has_double_lesson'],
+                'component_lessons' => [$workload]
+            ];
+
+            if ($lesson['has_double_lesson'] && $lesson['lessons_per_week'] >= 2) {
+                $double_lessons[] = $lesson; // One double lesson
+                // Remaining are single lessons
+                for ($i = 0; $i < $lesson['lessons_per_week'] - 2; $i++) {
+                    $single_lessons[] = $lesson;
+                }
+            } else {
+                // All are single lessons
+                for ($i = 0; $i < $lesson['lessons_per_week']; $i++) {
+                    $single_lessons[] = $lesson;
                 }
             }
-            $max_per_day = ($lesson['lessons_per_week'] > count(self::DAYS_OF_WEEK)) ? 2 : 1;
-            if ($lessons_on_day >= $max_per_day) {
-                return false;
-            }
         }
-        return true;
     }
 
-    private function check_resource_availability($class_id, $teacher_id, $day, $start_period, $duration)
-    {
-        for ($p = 0; $p < $duration; $p++) {
-            $period = $start_period + $p;
-            if (!empty($this->class_timetables[$class_id][$day][$period]) || !empty($this->teacher_timetables[$teacher_id][$day][$period])) {
-                return false; // Conflict found
-            }
-        }
-        return true;
-    }
+    // --- Placement using Scoring ---
+    $all_class_ids = array_column($classes, 'id'); // Get all class IDs for the conflict check
 
-    private function place_lesson($lesson, $slot)
-    {
-        $day = $slot['day'];
-        $start_period = $slot['period'];
-        $duration = $lesson['duration'] ?? 1;
+    // The order determines priority: most constrained lessons are scheduled first.
+    $all_lessons_in_order = [
+        'horizontal_doubles' => $horizontal_elective_doubles,
+        'doubles' => $double_lessons,
+        'horizontal_singles' => $horizontal_elective_singles,
+        'singles' => $single_lessons
+    ];
 
-        $lesson_info = [
-            'subject' => $lesson['subject_name'],
-            'teacher' => $lesson['teacher_name'],
-            'subject_id' => $lesson['subject_id'],
-        ];
+    foreach ($all_lessons_in_order as $type => $lessons) {
+        shuffle($lessons); // Randomize order within the same type to avoid bias
+        foreach ($lessons as $lesson) {
+            $is_double = ($type === 'doubles' || $type === 'horizontal_doubles');
+            
+            $best_slot = find_best_slot_for_lesson($lesson, $is_double, $class_timetables, $teacher_timetables, $all_class_ids);
 
-        if ($lesson['is_elective']) {
-            foreach ($lesson['workloads'] as $workload) {
-                for ($p = 0; $p < $duration; $p++) {
-                    $this->class_timetables[$workload['class_id']][$day][$start_period + $p] = $lesson_info;
-                    $this->teacher_timetables[$workload['teacher_id']][$day][$start_period + $p] = $workload['class_id'];
+            if ($best_slot) {
+                $day = $best_slot['day'];
+                $period = $best_slot['period'];
+                $class_ids_to_place = ($lesson['type'] === 'horizontal_elective') ? $lesson['participating_class_ids'] : [$lesson['class_id']];
+                $teachers_to_place = array_unique(array_column($lesson['component_lessons'], 'teacher_id'));
+
+                $lesson_info = [
+                    'subject_name' => $lesson['display_name'],
+                    'teacher_name' => count($teachers_to_place) > 1 ? 'Multiple' : $lesson['component_lessons'][0]['teacher_name'],
+                    'is_double' => $is_double,
+                    'is_elective' => $lesson['type'] === 'elective',
+                    'is_horizontal_elective' => $lesson['type'] === 'horizontal_elective'
+                ];
+
+                if ($is_double) {
+                    foreach ($class_ids_to_place as $cid) {
+                        $class_timetables[$cid][$day][$period] = $lesson_info;
+                        $class_timetables[$cid][$day][$period + 1] = $lesson_info;
+                    }
+                    foreach ($teachers_to_place as $tid) {
+                        $teacher_timetables[$tid][$day][$period] = true;
+                        $teacher_timetables[$tid][$day][$period + 1] = true;
+                    }
+                } else {
+                    foreach ($class_ids_to_place as $cid) {
+                        $class_timetables[$cid][$day][$period] = $lesson_info;
+                    }
+                    foreach ($teachers_to_place as $tid) {
+                        $teacher_timetables[$tid][$day][$period] = true;
+                    }
                 }
             }
-        } else {
-            for ($p = 0; $p < $duration; $p++) {
-                $this->class_timetables[$lesson['class_id']][$day][$start_period + $p] = $lesson_info;
-                $this->teacher_timetables[$lesson['teacher_id']][$day][$start_period + $p] = $lesson['class_id'];
-            }
         }
     }
 
-    private function unplace_lesson($lesson, $slot)
-    {
-        $day = $slot['day'];
-        $start_period = $slot['period'];
-        $duration = $lesson['duration'] ?? 1;
-
-        if ($lesson['is_elective']) {
-            foreach ($lesson['workloads'] as $workload) {
-                for ($p = 0; $p < $duration; $p++) {
-                    $this->class_timetables[$workload['class_id']][$day][$start_period + $p] = null;
-                    $this->teacher_timetables[$workload['teacher_id']][$day][$start_period + $p] = null;
-                }
-            }
-        } else {
-            for ($p = 0; $p < $duration; $p++) {
-                $this->class_timetables[$lesson['class_id']][$day][$start_period + $p] = null;
-                $this->teacher_timetables[$lesson['teacher_id']][$day][$start_period + $p] = null;
-            }
-        }
-    }
+    return $class_timetables;
 }
 
-// --- Data Fetching ---
-$pdo = db();
-$classes = $pdo->query("SELECT * FROM classes ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
-$teachers = $pdo->query("SELECT * FROM teachers")->fetchAll(PDO::FETCH_ASSOC);
-$workloads = $pdo->query("
-    SELECT 
-        w.class_id, c.name as class_name, 
-        w.subject_id, s.name as subject_name, s.has_double_lesson, s.elective_group,
-        w.teacher_id, t.name as teacher_name, 
-        w.lessons_per_week
-    FROM workloads w
-    JOIN classes c ON w.class_id = c.id
-    JOIN subjects s ON w.subject_id = s.id
-    JOIN teachers t ON w.teacher_id = t.id
-")->fetchAll(PDO::FETCH_ASSOC);
+$pdoconn = db();
+$workloads = get_workloads($pdoconn);
+$classes = get_classes($pdoconn);
+$class_timetables = [];
 
-// --- Run Scheduler ---
-$scheduler = new Scheduler($classes, $teachers, $workloads);
-$result = $scheduler->generate();
-$class_timetables = $result['class_timetables'];
-$raw_unplaced_lessons = $result['unplaced_lessons'];
-
-// Process unplaced lessons for display
-$unplaced_lessons_summary = [];
-foreach($raw_unplaced_lessons as $lesson) {
-    $key = $lesson['is_elective'] ? $lesson['group_name'] : $lesson['class_name'] . '-' . $lesson['subject_name'];
-    if (!isset($unplaced_lessons_summary[$key])) {
-        $unplaced_lessons_summary[$key] = [
-            'class' => $lesson['is_elective'] ? 'All Classes' : $lesson['class_name'],
-            'subject' => $lesson['is_elective'] ? "Elective: " . $lesson['group_name'] : $lesson['subject_name'],
-            'unplaced' => 0,
-            'total' => $lesson['is_elective'] ? $lesson['workloads'][0]['lessons_per_week'] : $lesson['lessons_per_week']
-        ];
-    }
-    $unplaced_lessons_summary[$key]['unplaced']++;
-}
-
-// --- Color Helper ---
-$subject_colors = [];
-$color_palette = ['#FFADAD', '#FFD6A5', '#FDFFB6', '#CAFFBF', '#9BF6FF', '#A0C4FF', '#BDB2FF', '#FFC6FF', '#FFC8DD', '#D4A5A5'];
-function get_subject_color($subject_name, &$subject_colors, $palette) {
-    if (!isset($subject_colors[$subject_name])) {
-        $subject_colors[$subject_name] = $palette[count($subject_colors) % count($palette)];
-    }
-    return $subject_colors[$subject_name];
+if (isset($_POST['generate'])) {
+    $class_timetables = generate_timetable($workloads, $classes);
 }
 
 ?>
@@ -299,14 +348,11 @@ function get_subject_color($subject_name, &$subject_colors, $palette) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generated Timetable - Haki Schedule</title>
-    <meta name="description" content="View the automatically generated class schedule with a modern, color-coded design.">
+    <title>Timetable - Haki Schedule</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.10.3/font/bootstrap-icons.min.css">
     <link rel="stylesheet" href="assets/css/custom.css?v=<?php echo time(); ?>">
 </head>
 <body>
-
     <nav class="navbar navbar-expand-lg navbar-light bg-white sticky-top shadow-sm">
         <div class="container">
             <a class="navbar-brand fw-bold" href="/">Haki Schedule</a>
@@ -340,94 +386,75 @@ function get_subject_color($subject_name, &$subject_colors, $palette) {
         </div>
     </nav>
 
-    <main class="container py-5">
-        <div class="printable-area">
-            <div class="d-flex justify-content-between align-items-center mb-4">
-                <div>
-                    <h1 class="h3 fw-bold">Generated Timetable</h1>
-                    <p class="text-muted">Automatically generated, color-coded class schedules.</p>
+    <div class="container mt-4">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>Timetable</h1>
+            <form method="POST" action="">
+                <button type="submit" name="generate" class="btn btn-primary">Generate Timetable</button>
+            </form>
+        </div>
+
+        <?php if (isset($_POST['generate'])): ?>
+            <?php if (empty($workloads)): ?>
+                 <div class="alert alert-warning">
+                    No workloads found. Please add classes, subjects, teachers, and workloads in the "Manage" section first.
                 </div>
-                <button onclick="window.print();" class="btn btn-primary d-print-none"><i class="bi bi-printer-fill me-2"></i>Print Timetable</button>
-            </div>
-
-            <?php if (!empty($unplaced_lessons_summary)): ?>
-            <div class="alert alert-warning">
-                <h5 class="alert-heading">Scheduling Conflict</h5>
-                <p>The system could not place all lessons. This is likely due to too many constraints (e.g., not enough available slots for a teacher). Please review workloads and constraints.</p>
-                <ul>
-                    <?php foreach ($unplaced_lessons_summary as $item): ?>
-                        <li>Could not place <?php echo $item['unplaced']; ?> of <?php echo $item['total']; ?> lessons for <strong><?php echo htmlspecialchars($item['subject']); ?></strong> in class <strong><?php echo htmlspecialchars($item['class']); ?></strong>.</li>
-                    <?php endforeach; ?>
-                </ul>
-            </div>
-            <?php endif; ?>
-
-            <?php if (empty($classes)): ?>
-                <div class="alert alert-info">Please <a href="admin_classes.php">create a class</a> and <a href="admin_workloads.php">assign workloads</a> to generate a timetable.</div>
             <?php else: ?>
-                <ul class="nav nav-tabs nav-fill mb-4 d-print-none" id="classTabs" role="tablist">
-                    <?php foreach ($classes as $index => $class): ?>
-                        <li class="nav-item" role="presentation">
-                            <button class="nav-link <?php echo $index === 0 ? 'active' : ''; ?>" id="tab-<?php echo $class['id']; ?>" data-bs-toggle="tab" data-bs-target="#content-<?php echo $class['id']; ?>" type="button" role="tab"><?php echo htmlspecialchars($class['name']); ?></button>
-                        </li>
-                    <?php endforeach; ?>
-                </ul>
-
-                <div class="tab-content" id="classTabsContent">
-                    <?php foreach ($classes as $index => $class): ?>
-                        <div class="tab-pane fade <?php echo $index === 0 ? 'show active' : ''; ?>" id="content-<?php echo $class['id']; ?>" role="tabpanel">
-                            <h4 class="d-none d-print-block mb-3 text-center">Timetable for <?php echo htmlspecialchars($class['name']); ?></h4>
-                            <div class="table-responsive">
-                                <table class="table table-bordered timetable-table text-center">
-                                    <thead>
-                                        <tr class="table-light">
-                                            <th class="time-col">Time</th>
-                                            <?php foreach (self::DAYS_OF_WEEK as $day): ?>
-                                                <th><?php echo $day; ?></th>
-                                            <?php endforeach; ?>
+                <?php foreach ($classes as $class): ?>
+                    <h3 class="mt-5"><?php echo htmlspecialchars($class['name']); ?></h3>
+                    <div class="card">
+                        <div class="card-body">
+                            <table class="table table-bordered text-center">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 12%;">Time</th>
+                                        <?php foreach (DAYS_OF_WEEK as $day):
+                                            ?><th><?php echo $day; ?></th>
+                                        <?php endforeach; ?>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php for ($period = 0; $period < PERIODS_PER_DAY; $period++):
+                                        ?><tr>
+                                            <td>Period <?php echo $period + 1; ?></td>
+                                            <?php for ($day_idx = 0; $day_idx < count(DAYS_OF_WEEK); $day_idx++):
+                                                ?><td>
+                                                    <?php 
+                                                    $lesson = $class_timetables[$class['id']][$day_idx][$period];
+                                                    if ($lesson):
+                                                        $class_str = '';
+                                                        if ($lesson['is_horizontal_elective']) {
+                                                            $class_str = 'bg-light-purple';
+                                                        } elseif ($lesson['is_elective']) {
+                                                            $class_str = 'bg-light-green';
+                                                        } elseif ($lesson['is_double']) {
+                                                            $class_str = 'bg-light-blue';
+                                                        }
+                                                    ?>
+                                                        <div class="p-1 <?php echo $class_str; ?>">
+                                                            <strong><?php echo htmlspecialchars($lesson['subject_name']); ?></strong><br>
+                                                            <small><?php echo htmlspecialchars($lesson['teacher_name']); ?></small>
+                                                        </div>
+                                                    <?php else:
+                                                        ?>&nbsp;
+                                                    <?php endif; ?>
+                                                </td>
+                                            <?php endfor; ?>
                                         </tr>
-                                    </thead>
-                                    <tbody>
-                                        <?php for ($period = 0; $period < self::PERIODS_PER_DAY; $period++): ?>
-                                            <?php if (in_array($period, self::BREAK_PERIODS)): ?>
-                                                <tr>
-                                                    <td class="time-col table-light"><strong><?php echo $period === 2 ? 'Break' : 'Lunch'; ?></strong></td>
-                                                    <td class="break-cell" colspan="<?php echo count(self::DAYS_OF_WEEK); ?>"></td>
-                                                </tr>
-                                            <?php else: ?>
-                                                <tr>
-                                                    <td class="time-col table-light"><?php echo sprintf('%02d:00 - %02d:00', 8 + $period + ($period > 2 ? 1 : 0) - ($period > 5 ? 1 : 0), 9 + $period + ($period > 2 ? 1 : 0) - ($period > 5 ? 1 : 0)); ?></td>
-                                                    <?php for ($day = 0; $day < count(self::DAYS_OF_WEEK); $day++): ?>
-                                                        <td class="timetable-cell-container">
-                                                            <?php if (!empty($class_timetables[$class['id']][$day][$period])): 
-                                                                $lesson = $class_timetables[$class['id']][$day][$period];
-                                                                $color = get_subject_color($lesson['subject'], $subject_colors, $color_palette);
-                                                            ?>
-                                                                <div class="timetable-cell" style="background-color: <?php echo $color; ?>;">
-                                                                    <div class="subject-name"><?php echo htmlspecialchars($lesson['subject']); ?></div>
-                                                                    <div class="teacher-name"><i class="bi bi-person-circle me-1"></i><?php echo htmlspecialchars($lesson['teacher']); ?></div>
-                                                                </div>
-                                                            <?php endif; ?>
-                                                        </td>
-                                                    <?php endfor; ?>
-                                                </tr>
-                                            <?php endif; ?>
-                                        <?php endfor; ?>
-                                    </tbody>
-                                </table>
-                            </div>
+                                    <?php endfor; ?>
+                                </tbody>
+                            </table>
                         </div>
-                    <?php endforeach; ?>
-                </div>
+                    </div>
+                <?php endforeach; ?>
             <?php endif; ?>
-        </div>
-    </main>
+        <?php else:
+            ?><div class="alert alert-info">
+                Click the "Generate Timetable" button to create a schedule based on the current workloads.
+            </div>
+        <?php endif; ?>
 
-    <footer class="bg-dark text-white py-4 mt-auto">
-        <div class="container text-center">
-            <p>&copy; <?php echo date("Y"); ?> Haki Schedule. All Rights Reserved.</p>
-        </div>
-    </footer>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
