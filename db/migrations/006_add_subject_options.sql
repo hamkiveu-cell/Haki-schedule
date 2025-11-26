@@ -1,3 +1,0 @@
-ALTER TABLE `subjects`
-ADD COLUMN `has_double_lesson` BOOLEAN NOT NULL DEFAULT FALSE,
-ADD COLUMN `elective_group` VARCHAR(255) NULL;

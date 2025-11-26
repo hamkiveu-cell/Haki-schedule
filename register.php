@@ -3,35 +3,68 @@ require_once __DIR__ . '/db/config.php';
 
 $message = '';
 $error = '';
+$registration_open = false;
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+try {
+    $pdo = db();
+    $stmt = $pdo->query("SELECT COUNT(*) FROM schools");
+    if ($stmt->fetchColumn() == 0) {
+        $registration_open = true;
+    }
+} catch (PDOException $e) {
+    $error = 'Database error: ' . $e->getMessage();
+}
+
+if ($registration_open && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $username = $_POST['username'] ?? null;
     $password = $_POST['password'] ?? null;
+    $school_name = $_POST['school_name'] ?? null;
+    $email = $_POST['email'] ?? null;
 
-    if (empty($username) || empty($password)) {
-        $error = 'Username and password are required.';
+    if (empty($username) || empty($password) || empty($school_name) || empty($email)) {
+        $error = 'All fields are required.';
     } else {
         try {
-            $pdo = db();
-            // Check if username already exists
-            $stmt = $pdo->prepare("SELECT id FROM users WHERE username = ?");
-            $stmt->execute([$username]);
-            if ($stmt->fetch()) {
-                $error = 'Username already taken. Please choose another one.';
-            } else {
-                // Hash the password
-                $hashed_password = password_hash($password, PASSWORD_DEFAULT);
+            $pdo->beginTransaction();
 
-                // Insert new user
-                $stmt = $pdo->prepare("INSERT INTO users (username, password, role) VALUES (?, ?, 'admin')");
-                if ($stmt->execute([$username, $hashed_password])) {
-                    $message = 'Registration successful! You can now <a href="login.php">login</a>.';
+            // Check if school name already exists
+            $stmt = $pdo->prepare("SELECT id FROM schools WHERE name = ?");
+            $stmt->execute([$school_name]);
+            if ($stmt->fetch()) {
+                $error = 'School name already taken. Please choose another one.';
+                $pdo->rollBack();
+            } else {
+                // Insert new school
+                $stmt = $pdo->prepare("INSERT INTO schools (name) VALUES (?)");
+                $stmt->execute([$school_name]);
+                $school_id = $pdo->lastInsertId();
+
+                // Check if username already exists
+                $stmt = $pdo->prepare("SELECT id FROM users WHERE username = ?");
+                $stmt->execute([$username]);
+                if ($stmt->fetch()) {
+                    $error = 'Username already taken. Please choose another one.';
+                    $pdo->rollBack();
                 } else {
-                    $error = 'Failed to register user.';
+                    // Hash the password
+                    $hashed_password = password_hash($password, PASSWORD_DEFAULT);
+
+                    // Insert new user
+                    $stmt = $pdo->prepare("INSERT INTO users (username, password, email, school_id, role) VALUES (?, ?, ?, ?, 'admin')");
+                    if ($stmt->execute([$username, $hashed_password, $email, $school_id])) {
+                        $pdo->commit();
+                        $message = 'Registration successful! You can now <a href="login.php">login</a>.';
+                    } else {
+                        $error = 'Failed to register user.';
+                        $pdo->rollBack();
+                    }
                 }
             }
         } catch (PDOException $e) {
             $error = 'Database error: ' . $e->getMessage();
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
         }
     }
 }
@@ -66,11 +99,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <div class="alert alert-danger"><?php echo $error; ?></div>
                         <?php endif; ?>
 
-                        <?php if (!$message): ?>
+                        <?php if (!$message && $registration_open): ?>
                         <form action="register.php" method="POST">
                             <div class="mb-3">
-                                <label for="username" class="form-label">Username</label>
+                                <label for="school_name" class="form-label">School Name</label>
+                                <input type="text" class="form-control" id="school_name" name="school_name" required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="username" class="form-label">Admin Username</label>
                                 <input type="text" class="form-control" id="username" name="username" required>
+                            </div>
+                             <div class="mb-3">
+                                <label for="email" class="form-label">Admin Email</label>
+                                <input type="email" class="form-control" id="email" name="email" required>
                             </div>
                             <div class="mb-3">
                                 <label for="password" class="form-label">Password</label>
@@ -82,6 +123,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         </form>
                         <div class="text-center mt-3">
                             <p>Already have an account? <a href="login.php">Login here</a>.</p>
+                        </div>
+                        <?php elseif (!$message): ?>
+                        <div class="alert alert-info">
+                            Registration is currently closed. Only one school can be registered.
+                            <p class="mt-3"><a href="login.php" class="btn btn-primary">Go to Login</a></p>
                         </div>
                         <?php endif; ?>
                     </div>

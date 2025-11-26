@@ -29,9 +29,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_SESSION['user_id'] = $user['id'];
                 $_SESSION['username'] = $user['username'];
                 $_SESSION['role'] = $user['role'];
+                $_SESSION['school_id'] = $user['school_id'];
                 
                 // Redirect to the main page
-                header("Location: index.php");
+                header("Location: dashboard.php");
                 exit;
             } else {
                 $error = 'Invalid username or password.';
@@ -63,7 +64,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <div class="col-lg-5">
                 <div class="card">
                     <div class="card-body p-4">
-                        <h1 class="h3 fw-bold text-center mb-4">Admin Login</h1>
+                        <h1 class="h3 fw-bold text-center mb-4">Login</h1>
                         
                         <?php if ($error): ?>
                             <div class="alert alert-danger"><?php echo $error; ?></div>

@@ -1,7 +1,7 @@
-CREATE TABLE IF NOT EXISTS timeslots (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    start_time TIME NOT NULL,
-    end_time TIME NOT NULL,
-    is_break BOOLEAN NOT NULL DEFAULT 0
-);
+CREATE TABLE IF NOT EXISTS `timeslots` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `day_of_week` VARCHAR(20) NOT NULL,
+  `start_time` TIME NOT NULL,
+  `end_time` TIME NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

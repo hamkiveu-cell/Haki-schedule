@@ -4,6 +4,7 @@ require_once __DIR__ . '/db/config.php';
 
 $message = '';
 $error = '';
+$school_id = $_SESSION['school_id'];
 
 // Handle POST request to add a new class
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['class_name'])) {
@@ -13,8 +14,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['class_name'])) {
     } else {
         try {
             $pdo = db();
-            $stmt = $pdo->prepare("INSERT INTO classes (name) VALUES (?)");
-            if ($stmt->execute([$className])) {
+            $stmt = $pdo->prepare("INSERT INTO classes (name, school_id) VALUES (?, ?)");
+            if ($stmt->execute([$className, $school_id])) {
                 $message = "Class '" . htmlspecialchars($className) . "' created successfully!";
             } else {
                 $error = 'Failed to create class.';
@@ -33,7 +34,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['class_name'])) {
 $classes = [];
 try {
     $pdo = db();
-    $classes_stmt = $pdo->query("SELECT id, name, created_at FROM classes ORDER BY created_at DESC");
+    $classes_stmt = $pdo->prepare("SELECT id, name, created_at FROM classes WHERE school_id = ? ORDER BY created_at DESC");
+    $classes_stmt->execute([$school_id]);
     $classes = $classes_stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
     $error = 'Database error: ' . $e->getMessage();

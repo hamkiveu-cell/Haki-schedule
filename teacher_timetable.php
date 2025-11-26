@@ -1,18 +1,18 @@
 <?php
 session_start();
-require_once 'includes/auth_check.php';
+require_once 'includes/auth_check_teacher.php';
 require_once 'db/config.php';
 
 // --- Database Fetch Functions ---
-function get_teachers($pdo) {
-    return $pdo->query("SELECT * FROM teachers ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
+function get_teachers($pdo, $school_id) {
+    return $pdo->prepare("SELECT * FROM teachers WHERE school_id = ? ORDER BY name")->execute([$school_id])->fetchAll(PDO::FETCH_ASSOC);
 }
 
 function get_timeslots($pdo) {
     return $pdo->query("SELECT * FROM timeslots ORDER BY start_time")->fetchAll(PDO::FETCH_ASSOC);
 }
 
-function get_teacher_schedule($pdo, $teacher_id) {
+function get_teacher_schedule($pdo, $teacher_id, $school_id) {
     $stmt = $pdo->prepare("
         SELECT 
             s.day_of_week,
@@ -24,19 +24,41 @@ function get_teacher_schedule($pdo, $teacher_id) {
             s.is_horizontal_elective
         FROM schedules s
         JOIN classes c ON s.class_id = c.id
-        WHERE s.teacher_id = :teacher_id
+        WHERE s.teacher_id = :teacher_id AND s.school_id = :school_id
     ");
-    $stmt->execute([':teacher_id' => $teacher_id]);
+    $stmt->execute([':teacher_id' => $teacher_id, ':school_id' => $school_id]);
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
 // --- Main Logic ---
 $pdoconn = db();
-$teachers = get_teachers($pdoconn);
+$school_id = $_SESSION['school_id'];
+$role = $_SESSION['role'];
+$user_id = $_SESSION['user_id'];
+
+$teachers = [];
+if ($role === 'admin') {
+    $stmt = $pdoconn->prepare("SELECT * FROM teachers WHERE school_id = ? ORDER BY name");
+    $stmt->execute([$school_id]);
+    $teachers = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} else { // Teacher
+    $stmt = $pdoconn->prepare("SELECT * FROM teachers WHERE user_id = ? AND school_id = ?");
+    $stmt->execute([$user_id, $school_id]);
+    $teachers = $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
 $timeslots = get_timeslots($pdoconn);
 $days_of_week = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
-$selected_teacher_id = isset($_GET['teacher_id']) ? $_GET['teacher_id'] : null;
+$selected_teacher_id = null;
+if ($role === 'admin') {
+    $selected_teacher_id = isset($_GET['teacher_id']) ? $_GET['teacher_id'] : null;
+} else { // Teacher
+    if (!empty($teachers)) {
+        $selected_teacher_id = $teachers[0]['id'];
+    }
+}
+
 $selected_teacher_name = '';
 $teacher_schedule_raw = [];
 if ($selected_teacher_id) {
@@ -46,7 +68,7 @@ if ($selected_teacher_id) {
             break;
         }
     }
-    $teacher_schedule_raw = get_teacher_schedule($pdoconn, $selected_teacher_id);
+    $teacher_schedule_raw = get_teacher_schedule($pdoconn, $selected_teacher_id, $school_id);
 }
 
 // Organize schedule for easy display
@@ -110,6 +132,7 @@ foreach ($teacher_schedule_raw as $lesson) {
                 <ul class="navbar-nav ms-auto">
                     <li class="nav-item"><a class="nav-link" href="/">Home</a></li>
                     <?php if (isset($_SESSION['user_id'])): ?>
+                        <?php if ($role === 'admin'): ?>
                         <li class="nav-item dropdown">
                             <a class="nav-link dropdown-toggle" href="#" id="manageDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                                 Manage
@@ -123,6 +146,7 @@ foreach ($teacher_schedule_raw as $lesson) {
                             </ul>
                         </li>
                         <li class="nav-item"><a class="nav-link" href="/timetable.php">Class Timetable</a></li>
+                        <?php endif; ?>
                         <li class="nav-item"><a class="nav-link active" href="/teacher_timetable.php">Teacher Timetable</a></li>
                         <li class="nav-item"><a class="nav-link" href="/logout.php">Logout</a></li>
                     <?php else: ?>
@@ -146,6 +170,7 @@ foreach ($teacher_schedule_raw as $lesson) {
             <?php endif; ?>
         </div>
 
+        <?php if ($role === 'admin'): ?>
         <form method="GET" action="" class="mb-4">
             <div class="row">
                 <div class="col-md-4">
@@ -153,7 +178,7 @@ foreach ($teacher_schedule_raw as $lesson) {
                     <select name="teacher_id" id="teacher_id" class="form-select" onchange="this.form.submit()">
                         <option value="">-- Select a Teacher --</option>
                         <?php foreach ($teachers as $teacher): ?>
-                            <option value="<?php echo $teacher['id']; ?>" <?php echo ($selected_teacher_id == $teacher['id']) ? 'selected' : ''; ?>>
+                            <option value="<?php echo $teacher['id']; ?>" <?php echo ($selected_teacher_id == $teacher['id']['id']) ? 'selected' : ''; ?>>
                                 <?php echo htmlspecialchars($teacher['name']); ?>
                             </option>
                         <?php endforeach; ?>
@@ -161,6 +186,7 @@ foreach ($teacher_schedule_raw as $lesson) {
                 </div>
             </div>
         </form>
+        <?php endif; ?>
 
         <div id="timetable-container">
             <?php if ($selected_teacher_id && !empty($teacher_schedule_raw)): ?>

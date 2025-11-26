@@ -4,11 +4,13 @@ require_once __DIR__ . '/db/config.php';
 
 $message = '';
 $error = '';
+$school_id = $_SESSION['school_id'];
 
 // Handle POST request to add a new teacher
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $teacherName = trim($_POST['teacher_name'] ?? '');
     $teacherEmail = trim($_POST['teacher_email'] ?? '');
+    $can_edit_workload = isset($_POST['can_edit_workload']) ? 1 : 0;
 
     if (empty($teacherName) || empty($teacherEmail)) {
         $error = 'Teacher name and email cannot be empty.';
@@ -17,17 +19,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         try {
             $pdo = db();
-            $stmt = $pdo->prepare("INSERT INTO teachers (name, email) VALUES (?, ?)");
-            if ($stmt->execute([$teacherName, $teacherEmail])) {
-                $message = 'Teacher "' . htmlspecialchars($teacherName) . '" created successfully!';
+            $pdo->beginTransaction();
+
+            // Check if user with this email already exists
+            $stmt = $pdo->prepare("SELECT id FROM users WHERE email = ?");
+            $stmt->execute([$teacherEmail]);
+            if ($stmt->fetch()) {
+                $error = 'A user with this email already exists.';
+                $pdo->rollBack();
             } else {
-                $error = 'Failed to create teacher.';
+                // Generate a random password
+                $password = bin2hex(random_bytes(8));
+                $hashed_password = password_hash($password, PASSWORD_DEFAULT);
+
+                // Create a user account for the teacher
+                $stmt = $pdo->prepare("INSERT INTO users (username, password, email, school_id, role) VALUES (?, ?, ?, ?, 'teacher')");
+                $stmt->execute([$teacherEmail, $hashed_password, $teacherEmail, $school_id]);
+                $user_id = $pdo->lastInsertId();
+
+                // Create the teacher
+                $stmt = $pdo->prepare("INSERT INTO teachers (name, user_id, school_id, can_edit_workload) VALUES (?, ?, ?, ?)");
+                if ($stmt->execute([$teacherName, $user_id, $school_id, $can_edit_workload])) {
+                    $pdo->commit();
+                    $message = 'Teacher "' . htmlspecialchars($teacherName) . '" created successfully! Their password is: ' . $password;
+                } else {
+                    $error = 'Failed to create teacher.';
+                    $pdo->rollBack();
+                }
             }
         } catch (PDOException $e) {
             if ($e->errorInfo[1] == 1062) { // Duplicate entry
-                $error = 'Error: A teacher with the email "' . htmlspecialchars($teacherEmail) . '" already exists.';
+                $error = 'Error: A teacher with this email already exists.';
             } else {
                 $error = 'Database error: ' . $e->getMessage();
+            }
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
             }
         }
     }
@@ -37,7 +64,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $teachers = [];
 try {
     $pdo = db();
-    $stmt = $pdo->query("SELECT id, name, email, created_at FROM teachers ORDER BY created_at DESC");
+    $stmt = $pdo->prepare("SELECT t.id, t.name, u.email, t.can_edit_workload, t.created_at FROM teachers t JOIN users u ON t.user_id = u.id WHERE t.school_id = ? ORDER BY t.created_at DESC");
+    $stmt->execute([$school_id]);
     $teachers = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
     $error = 'Database error: ' . $e->getMessage();
@@ -115,6 +143,10 @@ try {
                                 <label for="teacher_email" class="form-label">Teacher Email</label>
                                 <input type="email" class="form-control" id="teacher_email" name="teacher_email" placeholder="e.g., john.doe@example.com" required>
                             </div>
+                            <div class="mb-3 form-check">
+                                <input type="checkbox" class="form-check-input" id="can_edit_workload" name="can_edit_workload" value="1">
+                                <label class="form-check-label" for="can_edit_workload">Can edit their own workload</label>
+                            </div>
                             <button type="submit" class="btn btn-primary">Create Teacher</button>
                         </form>
                     </div>
@@ -128,17 +160,30 @@ try {
                             <p class="text-muted">No teachers have been created yet. Use the form above to add the first one.</p>
                         <?php else:
                             if(!empty($teachers)) : ?>
-                            <ul class="list-group list-group-flush">
-                                <?php foreach ($teachers as $teacher): ?>
-                                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                                        <div>
-                                            <strong><?php echo htmlspecialchars($teacher['name']); ?></strong><br>
-                                            <small class="text-muted"><?php echo htmlspecialchars($teacher['email']); ?></small>
-                                        </div>
-                                        <small class="text-muted">Created: <?php echo date("M j, Y", strtotime($teacher['created_at'])); ?></small>
-                                    </li>
-                                <?php endforeach; ?>
-                            </ul>
+                            <div class="table-responsive">
+                                <table class="table table-striped">
+                                    <thead>
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>Email</th>
+                                            <th>Can Edit Workload</th>
+                                            <th>Created</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($teachers as $teacher): ?>
+                                            <tr>
+                                                <td><?php echo htmlspecialchars($teacher['name']); ?></td>
+                                                <td><?php echo htmlspecialchars($teacher['email']); ?></td>
+                                                <td><?php echo $teacher['can_edit_workload'] ? 'Yes' : 'No'; ?></td>
+                                                <td><?php echo date("M j, Y", strtotime($teacher['created_at'])); ?></td>
+                                                <td><a href="admin_edit_teacher.php?id=<?php echo $teacher['id']; ?>" class="btn btn-sm btn-outline-primary">Edit</a></td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
                         <?php endif; endif; ?>
                     </div>
                 </div>
