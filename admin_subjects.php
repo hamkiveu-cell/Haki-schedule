@@ -17,7 +17,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_id'])) {
         $stmt->execute([$delete_id, $school_id]);
         $message = "Subject deleted successfully.";
     } catch (PDOException $e) {
-        $error = "Error deleting subject: " . $e->getMessage();
+        if ($e->getCode() == '23000') { // Integrity constraint violation
+            $error = "Cannot delete this subject because it is currently used in workloads or schedules. Please remove those associations before deleting.";
+        } else {
+            $error = "Error deleting subject: " . $e->getMessage();
+        }
     }
 }
 

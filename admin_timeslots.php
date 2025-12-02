@@ -32,7 +32,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = 'Failed to delete timeslot.';
             }
         } catch (PDOException $e) {
-            $error = 'Database error: ' . $e->getMessage();
+            if ($e->getCode() == '23000') { // Integrity constraint violation
+                $error = "Cannot delete this timeslot because it is currently used in schedules. Please remove those associations before deleting.";
+            } else {
+                $error = "Error deleting timeslot: " . $e->getMessage();
+            }
         }
     }
     if (isset($_POST['add_timeslot'])) {

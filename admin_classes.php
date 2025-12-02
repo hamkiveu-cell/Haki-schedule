@@ -17,7 +17,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_id'])) {
         $stmt->execute([$delete_id, $school_id]);
         $message = "Class deleted successfully.";
     } catch (PDOException $e) {
-        $error = "Error deleting class: " . $e->getMessage();
+        if ($e->getCode() == '23000') { // Integrity constraint violation
+            $error = "Cannot delete this class because it has subjects, workloads, or schedules associated with it. Please remove those associations before deleting.";
+        } else {
+            $error = "Error deleting class: " . $e->getMessage();
+        }
     }
 }
 

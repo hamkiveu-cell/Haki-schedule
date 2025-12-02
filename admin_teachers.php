@@ -29,7 +29,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_id'])) {
         $message = "Teacher deleted successfully.";
     } catch (PDOException $e) {
         $pdo->rollBack();
-        $error = "Error deleting teacher: " . $e->getMessage();
+        if ($e->getCode() == '23000') { // Integrity constraint violation
+            $error = "Cannot delete this teacher because they are assigned to workloads or schedules. Please remove those associations before deleting.";
+        } else {
+            $error = "Error deleting teacher: " . $e->getMessage();
+        }
     }
 }
 

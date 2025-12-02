@@ -85,9 +85,9 @@ foreach ($timeslots as $timeslot) {
 }
 
 foreach ($teacher_schedule_raw as $lesson) {
-    $day_idx = $lesson['day_of_week'];
+    $day_idx = $lesson['day_of_week'] - 1; // Adjust for 0-based array index
     $timeslot_id = $lesson['timeslot_id'];
-    if (isset($teacher_timetable[$day_idx][$timeslot_id])) {
+    if (isset($teacher_timetable[$day_idx]) && isset($teacher_timetable[$day_idx][$timeslot_id])) {
         $teacher_timetable[$day_idx][$timeslot_id] = $lesson;
     }
 }
@@ -181,7 +181,7 @@ foreach ($teacher_schedule_raw as $lesson) {
                     <select name="teacher_id" id="teacher_id" class="form-select" onchange="this.form.submit()">
                         <option value="">-- Select a Teacher --</option>
                         <?php foreach ($teachers as $teacher): ?>
-                            <option value="<?php echo $teacher['id']; ?>" <?php echo ($selected_teacher_id == $teacher['id']) ? 'selected' : ''; ?>>
+                            <option value="<?php echo $teacher['id']; ?>" <?php echo ($selected_teacher_id == $teacher['id']) ? 'selected' : ''; ?> >
                                 <?php echo htmlspecialchars($teacher['name']); ?>
                             </option>
                         <?php endforeach; ?>
