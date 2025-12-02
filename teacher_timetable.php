@@ -5,7 +5,9 @@ require_once 'db/config.php';
 
 // --- Database Fetch Functions ---
 function get_teachers($pdo, $school_id) {
-    return $pdo->prepare("SELECT * FROM teachers WHERE school_id = ? ORDER BY name")->execute([$school_id])->fetchAll(PDO::FETCH_ASSOC);
+    $stmt = $pdo->prepare("SELECT * FROM teachers WHERE school_id = ? ORDER BY name");
+    $stmt->execute([$school_id]);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
 function get_timeslots($pdo) {
@@ -24,7 +26,8 @@ function get_teacher_schedule($pdo, $teacher_id, $school_id) {
             s.is_horizontal_elective
         FROM schedules s
         JOIN classes c ON s.class_id = c.id
-        WHERE s.teacher_id = :teacher_id AND s.school_id = :school_id
+        JOIN schedule_teachers st ON s.id = st.schedule_id
+        WHERE st.teacher_id = :teacher_id AND c.school_id = :school_id
     ");
     $stmt->execute([':teacher_id' => $teacher_id, ':school_id' => $school_id]);
     return $stmt->fetchAll(PDO::FETCH_ASSOC);

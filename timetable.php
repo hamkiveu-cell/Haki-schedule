@@ -290,7 +290,8 @@ function generate_timetable($workloads, $classes, $days_of_week, $periods_per_da
                 'teacher_name' => count($teachers_to_place) > 1 ? 'Multiple' : $lesson['component_lessons'][0]['teacher_name'],
                 'is_double' => $is_double,
                 'is_elective' => $lesson['type'] === 'elective',
-                'is_horizontal_elective' => $lesson['type'] === 'horizontal_elective'
+                'is_horizontal_elective' => $lesson['type'] === 'horizontal_elective',
+                'component_lessons' => $lesson['component_lessons']
             ];
 
             if ($is_double) {
@@ -314,31 +315,56 @@ function generate_timetable($workloads, $classes, $days_of_week, $periods_per_da
 // --- Timetable Persistence ---
 function save_timetable($pdo, $class_timetables, $timeslots) {
     $pdo->exec('TRUNCATE TABLE schedules');
+    $pdo->exec('TRUNCATE TABLE schedule_teachers');
+
     $stmt = $pdo->prepare(
-        'INSERT INTO schedules (class_id, day_of_week, timeslot_id, subject_id, teacher_id, lesson_display_name, teacher_display_name, is_double, is_elective, is_horizontal_elective) ' .
-        'VALUES (:class_id, :day_of_week, :timeslot_id, :subject_id, :teacher_id, :lesson_display_name, :teacher_display_name, :is_double, :is_elective, :is_horizontal_elective)'
+        'INSERT INTO schedules (class_id, day_of_week, timeslot_id, subject_id, lesson_display_name, teacher_display_name, is_double, is_elective, is_horizontal_elective) ' .
+        'VALUES (:class_id, :day_of_week, :timeslot_id, :subject_id, :lesson_display_name, :teacher_display_name, :is_double, :is_elective, :is_horizontal_elective)'
+    );
+    $teacher_stmt = $pdo->prepare(
+        'INSERT INTO schedule_teachers (schedule_id, teacher_id) VALUES (:schedule_id, :teacher_id)'
     );
 
     $lesson_periods = array_values(array_filter($timeslots, function($ts) { return !$ts['is_break']; }));
 
     foreach ($class_timetables as $class_id => $day_schedule) {
         foreach ($day_schedule as $day_idx => $period_schedule) {
+            $processed_periods = [];
             foreach ($period_schedule as $period_idx => $lesson) {
-                if ($lesson) {
+                if ($lesson && !in_array($period_idx, $processed_periods)) {
                     if (!isset($lesson_periods[$period_idx])) continue;
                     $timeslot_id = $lesson_periods[$period_idx]['id'];
+
                     $stmt->execute([
                         ':class_id' => $class_id,
                         ':day_of_week' => $day_idx,
                         ':timeslot_id' => $timeslot_id,
                         ':subject_id' => $lesson['subject_id'],
-                        ':teacher_id' => $lesson['teacher_id'],
                         ':lesson_display_name' => $lesson['subject_name'],
                         ':teacher_display_name' => $lesson['teacher_name'],
                         ':is_double' => (int)$lesson['is_double'],
                         ':is_elective' => (int)$lesson['is_elective'],
                         ':is_horizontal_elective' => (int)$lesson['is_horizontal_elective']
                     ]);
+
+                    $schedule_id = $pdo->lastInsertId();
+
+                    if (!empty($lesson['component_lessons'])) {
+                        $teacher_ids = array_unique(array_column($lesson['component_lessons'], 'teacher_id'));
+                        foreach ($teacher_ids as $teacher_id) {
+                            if ($teacher_id) {
+                                $teacher_stmt->execute([
+                                    ':schedule_id' => $schedule_id,
+                                    ':teacher_id' => $teacher_id
+                                ]);
+                            }
+                        }
+                    }
+
+                    $processed_periods[] = $period_idx;
+                    if ($lesson['is_double']) {
+                        $processed_periods[] = $period_idx + 1;
+                    }
                 }
             }
         }
@@ -350,10 +376,15 @@ function get_timetable_from_db($pdo, $classes, $timeslots) {
     $saved_lessons = $stmt->fetchAll(PDO::FETCH_ASSOC);
     if (empty($saved_lessons)) return [];
 
+    // Get teacher associations
+    $schedule_teachers_stmt = $pdo->query('SELECT st.schedule_id, t.name, t.id FROM schedule_teachers st JOIN teachers t ON st.teacher_id = t.id');
+    $schedule_teachers = $schedule_teachers_stmt->fetchAll(PDO::FETCH_GROUP | PDO::FETCH_ASSOC);
+
+
     $days_of_week = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
     $periods = array_filter($timeslots, function($ts) { return !$ts['is_break']; });
     $periods_per_day = count($periods);
-    
+
     $class_timetables = [];
     foreach ($classes as $class) {
         $class_timetables[$class['id']] = array_fill(0, count($days_of_week), array_fill(0, $periods_per_day, null));
@@ -369,20 +400,33 @@ function get_timetable_from_db($pdo, $classes, $timeslots) {
         $class_id = $lesson['class_id'];
         $day_idx = $lesson['day_of_week'];
         $timeslot_id = $lesson['timeslot_id'];
-        
+
         if (!isset($timeslot_id_to_period_idx[$timeslot_id]) || !isset($class_timetables[$class_id])) continue;
         $period_idx = $timeslot_id_to_period_idx[$timeslot_id];
 
-        $class_timetables[$class_id][$day_idx][$period_idx] = [
+        $teachers_for_lesson = $schedule_teachers[$lesson['id']] ?? [];
+        $teacher_name = $lesson['teacher_display_name'];
+        if (count($teachers_for_lesson) > 1) {
+            $teacher_name = 'Multiple';
+        } elseif (count($teachers_for_lesson) === 1) {
+            $teacher_name = $teachers_for_lesson[0]['name'];
+        }
+
+
+        $lesson_data = [
             'id' => $lesson['id'],
             'subject_id' => $lesson['subject_id'],
-            'teacher_id' => $lesson['teacher_id'],
             'subject_name' => $lesson['lesson_display_name'],
-            'teacher_name' => $lesson['teacher_display_name'],
+            'teacher_name' => $teacher_name,
             'is_double' => (bool)$lesson['is_double'],
             'is_elective' => (bool)$lesson['is_elective'],
             'is_horizontal_elective' => (bool)$lesson['is_horizontal_elective']
         ];
+
+        $class_timetables[$class_id][$day_idx][$period_idx] = $lesson_data;
+        if ($lesson_data['is_double'] && isset($class_timetables[$class_id][$day_idx][$period_idx + 1])) {
+            $class_timetables[$class_id][$day_idx][$period_idx + 1] = $lesson_data;
+        }
     }
     return $class_timetables;
 }
