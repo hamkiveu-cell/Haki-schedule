@@ -25,6 +25,8 @@ $role = $_SESSION['role'] ?? '';
                                 <li><a class="dropdown-item" href="/admin_workloads.php">Workloads</a></li>
                                 <li><a class="dropdown-item" href="/admin_timeslots.php">Timeslots</a></li>
                                 <li><a class="dropdown-item" href="/admin_elective_groups.php">Elective Groups</a></li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item" href="/admin_data_management.php">Data Management</a></li>
                             </ul>
                         </li>
                         <li class="nav-item"><a class="nav-link <?php echo ($current_page == 'timetable.php') ? 'active' : ''; ?>" href="/timetable.php">Class Timetable</a></li>

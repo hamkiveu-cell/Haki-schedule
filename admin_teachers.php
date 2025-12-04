@@ -137,6 +137,21 @@ try {
     $error = 'Database error: ' . $e->getMessage();
 }
 
+// Check for teachers with no user account linked
+$unlinked_teachers = [];
+foreach ($teachers as $teacher) {
+    if (empty($teacher['user_id'])) {
+        $unlinked_teachers[] = $teacher['name'];
+    }
+}
+if (!empty($unlinked_teachers)) {
+    $unlinked_list = '<ul>';
+    foreach ($unlinked_teachers as $name) {
+        $unlinked_list .= '<li>' . htmlspecialchars($name) . '</li>';
+    }
+    $unlinked_list .= '</ul>';
+    $error .= '<div class="alert alert-warning mt-3"><strong>Data Inconsistency Found:</strong> The following teachers are not linked to a user account and will not be able to log in or see their timetables: ' . $unlinked_list . ' To fix this, please delete these teachers and create them again. This will create a linked user account for them.</div>';
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -245,7 +260,12 @@ try {
                                     <tbody>
                                         <?php foreach ($teachers as $teacher): ?>
                                             <tr>
-                                                <td><?php echo htmlspecialchars($teacher['name']); ?></td>
+                                                <td>
+                                                    <?php echo htmlspecialchars($teacher['name']); ?>
+                                                    <?php if (empty($teacher['user_id'])): ?>
+                                                        <span class="badge bg-danger" title="This teacher is not linked to a user account.">!</span>
+                                                    <?php endif; ?>
+                                                </td>
                                                 <td><?php echo htmlspecialchars($teacher['email']); ?></td>
                                                 <td>
                                                     <a href="?edit_id=<?php echo $teacher['id']; ?>" class="btn btn-sm btn-outline-primary">Edit</a>

@@ -27,7 +27,7 @@ function get_teacher_schedule($pdo, $teacher_id, $school_id) {
         FROM schedules s
         JOIN classes c ON s.class_id = c.id
         JOIN schedule_teachers st ON s.id = st.schedule_id
-        WHERE st.teacher_id = :teacher_id AND c.school_id = :school_id
+        WHERE st.teacher_id = :teacher_id AND s.school_id = :school_id
     ");
     $stmt->execute([':teacher_id' => $teacher_id, ':school_id' => $school_id]);
     return $stmt->fetchAll(PDO::FETCH_ASSOC);

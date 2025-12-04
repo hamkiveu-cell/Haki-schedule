@@ -4,14 +4,25 @@ require_once 'includes/auth_check.php';
 require_once 'db/config.php';
 
 // --- Database Fetch ---
-function get_all_data($pdo) {
+function get_all_data($pdo, $school_id) {
     $data = [];
-    $data['classes'] = $pdo->query("SELECT * FROM classes ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
-    $data['subjects'] = $pdo->query("SELECT id, name FROM subjects")->fetchAll(PDO::FETCH_KEY_PAIR);
-    $data['teachers'] = $pdo->query("SELECT id, name FROM teachers")->fetchAll(PDO::FETCH_KEY_PAIR);
+    
+    $stmt_classes = $pdo->prepare("SELECT * FROM classes WHERE school_id = ? ORDER BY name");
+    $stmt_classes->execute([$school_id]);
+    $data['classes'] = $stmt_classes->fetchAll(PDO::FETCH_ASSOC);
+
+    $stmt_subjects = $pdo->prepare("SELECT id, name FROM subjects WHERE school_id = ?");
+    $stmt_subjects->execute([$school_id]);
+    $data['subjects'] = $stmt_subjects->fetchAll(PDO::FETCH_KEY_PAIR);
+
+    $stmt_teachers = $pdo->prepare("SELECT id, name FROM teachers WHERE school_id = ?");
+    $stmt_teachers->execute([$school_id]);
+    $data['teachers'] = $stmt_teachers->fetchAll(PDO::FETCH_KEY_PAIR);
+
+    // Timeslots are not school-specific in the current schema
     $data['timeslots'] = $pdo->query("SELECT * FROM timeslots ORDER BY start_time")->fetchAll(PDO::FETCH_ASSOC);
     
-    $workloads_stmt = $pdo->query("
+    $workloads_stmt = $pdo->prepare("
         SELECT 
             w.class_id, w.subject_id, w.teacher_id, w.lessons_per_week,
             s.name as subject_name, s.has_double_lesson, s.elective_group_id,
@@ -23,7 +34,9 @@ function get_all_data($pdo) {
         JOIN classes c ON w.class_id = c.id
         JOIN teachers t ON w.teacher_id = t.id
         LEFT JOIN elective_groups eg ON s.elective_group_id = eg.id
+        WHERE w.school_id = ?
     ");
+    $workloads_stmt->execute([$school_id]);
     $data['workloads'] = $workloads_stmt->fetchAll(PDO::FETCH_ASSOC);
 
     return $data;
@@ -200,17 +213,17 @@ function find_best_slot_for_lesson($lesson, &$class_timetables, &$teacher_timeta
 
 
 // --- Timetable Persistence ---
-function save_timetable($pdo, $class_timetables, $timeslots) {
+function save_timetable($pdo, $class_timetables, $timeslots, $school_id) {
     try {
         $pdo->beginTransaction();
-        $pdo->exec('SET FOREIGN_KEY_CHECKS=0');
-        $pdo->exec('TRUNCATE TABLE schedule_teachers');
-        $pdo->exec('TRUNCATE TABLE schedules');
-        $pdo->exec('SET FOREIGN_KEY_CHECKS=1');
+
+        // Safer delete: only remove schedules for the current school
+        $delete_stmt = $pdo->prepare('DELETE FROM schedules WHERE school_id = ?');
+        $delete_stmt->execute([$school_id]);
 
         $stmt = $pdo->prepare(
-            'INSERT INTO schedules (class_id, day_of_week, timeslot_id, subject_id, lesson_display_name, teacher_display_name, is_double, is_elective) ' .
-            'VALUES (:class_id, :day_of_week, :timeslot_id, :subject_id, :lesson_display_name, :teacher_display_name, :is_double, :is_elective)'
+            'INSERT INTO schedules (class_id, day_of_week, timeslot_id, subject_id, lesson_display_name, teacher_display_name, is_double, is_elective, school_id) ' .
+            'VALUES (:class_id, :day_of_week, :timeslot_id, :subject_id, :lesson_display_name, :teacher_display_name, :is_double, :is_elective, :school_id)'
         );
         $teacher_stmt = $pdo->prepare(
             'INSERT INTO schedule_teachers (schedule_id, teacher_id) VALUES (:schedule_id, :teacher_id)'
@@ -235,11 +248,16 @@ function save_timetable($pdo, $class_timetables, $timeslots) {
                             ':lesson_display_name' => $display_name,
                             ':teacher_display_name' => $lesson['teacher_name'],
                             ':is_double' => (int)$lesson['is_double'],
-                            ':is_elective' => (int)$lesson['is_elective']
+                            ':is_elective' => (int)$lesson['is_elective'],
+                            ':school_id' => $school_id
                         ]);
 
                         $schedule_id = $pdo->lastInsertId();
 
+                        // Before inserting into schedule_teachers, we need to delete old entries for this schedule_id
+                        // This is implicitly handled by the school-wide delete at the beginning.
+                        // However, if we were not doing a full delete, we would need to clear old teachers for this lesson.
+                        
                         foreach ($lesson['teacher_ids'] as $teacher_id) {
                             $teacher_stmt->execute([':schedule_id' => $schedule_id, ':teacher_id' => $teacher_id]);
                         }
@@ -259,8 +277,9 @@ function save_timetable($pdo, $class_timetables, $timeslots) {
     }
 }
 
-function get_timetable_from_db($pdo, $classes, $timeslots) {
-    $stmt = $pdo->query('SELECT * FROM schedules ORDER BY id');
+function get_timetable_from_db($pdo, $classes, $timeslots, $school_id) {
+    $stmt = $pdo->prepare('SELECT * FROM schedules WHERE school_id = ? ORDER BY id');
+    $stmt->execute([$school_id]);
     $saved_lessons = $stmt->fetchAll(PDO::FETCH_ASSOC);
     if (empty($saved_lessons)) return [];
 
@@ -305,7 +324,9 @@ function get_timetable_from_db($pdo, $classes, $timeslots) {
 
 // --- Main Logic ---
 $pdoconn = db();
-$all_data = get_all_data($pdoconn);
+$school_id = $_SESSION['school_id']; // Get school_id from session
+
+$all_data = get_all_data($pdoconn, $school_id);
 $classes = $all_data['classes'];
 $timeslots = $all_data['timeslots'];
 $workloads = $all_data['workloads'];
@@ -316,10 +337,10 @@ $class_timetables = [];
 if (isset($_POST['generate'])) {
     if (!empty($workloads)) {
         $class_timetables = generate_timetable($all_data, $days_of_week);
-        save_timetable($pdoconn, $class_timetables, $timeslots);
+        save_timetable($pdoconn, $class_timetables, $timeslots, $school_id);
     }
 } else {
-    $class_timetables = get_timetable_from_db($pdoconn, $classes, $timeslots);
+    $class_timetables = get_timetable_from_db($pdoconn, $classes, $timeslots, $school_id);
 }
 ?>
 <!DOCTYPE html>
