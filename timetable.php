@@ -470,30 +470,28 @@ $classes = $all_data['classes'];
 $timeslots = $all_data['timeslots'];
 $workloads = $all_data['workloads'];
 
-// Fetch working days from school settings
+// Fetch working days from school settings and apply a strict filter
 $school_id = $_SESSION['school_id'] ?? null;
-$days_of_week = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']; // Default
+$days_of_week = [];
+$allowed_days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+
 if ($school_id) {
     $stmt = $pdoconn->prepare("SELECT working_days FROM schools WHERE id = ?");
     $stmt->execute([$school_id]);
-    $school_settings = $stmt->fetch(PDO::FETCH_ASSOC);
-    if ($school_settings && !empty($school_settings['working_days'])) {
-        $days_from_db = array_map('trim', explode(',', $school_settings['working_days']));
-        
-        // Explicitly filter for valid days from Monday to Friday
-        $valid_weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-        $filtered_days = [];
-        foreach ($days_from_db as $day) {
-            if (in_array($day, $valid_weekdays)) {
-                $filtered_days[] = $day;
-            }
-        }
-        
-        if (!empty($filtered_days)) {
-            $days_of_week = $filtered_days;
-        }
+    $working_days_str = $stmt->fetchColumn();
+    if ($working_days_str) {
+        $days_from_db = array_map('trim', explode(',', $working_days_str));
+        // Intersect with the allowed days to filter out anything else
+        $days_of_week = array_intersect($days_from_db, $allowed_days);
     }
 }
+
+// If after all that, the list is empty, fall back to the default
+if (empty($days_of_week)) {
+    $days_of_week = $allowed_days;
+}
+// Ensure the array is numerically indexed from 0
+$days_of_week = array_values($days_of_week);
 
 $class_timetables = [];
 
