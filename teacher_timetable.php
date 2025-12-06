@@ -205,85 +205,81 @@ error_log("Final teacher_timetable_by_period structure: " . print_r($teacher_tim
                             </thead>
                             <tbody>
                                 <?php
-                                $period_idx = 0;
-                                foreach ($timeslots as $timeslot):
+                                $period_indices = array_keys($non_break_periods);
+                                foreach ($period_indices as $period_idx) {
+                                    $current_timeslot_id = $non_break_periods[$period_idx]['id'];
+                                    // Find the full timeslot info, including breaks
+                                    $timeslot_info = null;
+                                    foreach ($timeslots as $ts) {
+                                        if ($ts['id'] === $current_timeslot_id) {
+                                            $timeslot_info = $ts;
+                                            break;
+                                        }
+                                    }
+
+                                    // Find if there is a break before this timeslot
+                                    $break_html = '';
+                                    $last_period_end_time = null;
+                                    if ($period_idx > 0) {
+                                        $prev_period_id = $non_break_periods[$period_idx - 1]['id'];
+                                        foreach($timeslots as $ts) {
+                                            if ($ts['id'] === $prev_period_id) {
+                                                $last_period_end_time = $ts['end_time'];
+                                                break;
+                                            }
+                                        }
+                                    }
+
+                                    foreach ($timeslots as $ts) {
+                                        if ($ts['is_break'] && $ts['start_time'] >= $last_period_end_time && $ts['start_time'] < $timeslot_info['start_time']) {
+                                            $break_html .= '<tr>';
+                                            $break_html .= '<td><strong>' . htmlspecialchars($ts['name']) . '</strong><br><small class="text-muted">' . date("g:i A", strtotime($ts['start_time'])) . ' - ' . date("g:i A", strtotime($ts['end_time'])) . '</small></td>';
+                                            $break_html .= '<td colspan="' . count($days_of_week) . '" class="text-center table-secondary"><strong>Break</strong></td>';
+                                            $break_html .= '</tr>';
+                                        }
+                                    }
+                                    echo $break_html;
                                 ?>
                                     <tr>
                                         <td>
-                                            <strong><?php echo htmlspecialchars($timeslot['name']); ?></strong><br>
-                                            <small class="text-muted"><?php echo date("g:i A", strtotime($timeslot['start_time'])); ?> - <?php echo date("g:i A", strtotime($timeslot['end_time'])); ?></small>
+                                            <strong><?php echo htmlspecialchars($timeslot_info['name']); ?></strong><br>
+                                            <small class="text-muted"><?php echo date("g:i A", strtotime($timeslot_info['start_time'])); ?> - <?php echo date("g:i A", strtotime($timeslot_info['end_time'])); ?></small>
                                         </td>
-                                        <?php if ($timeslot['is_break']) : ?>
-                                            <td colspan="<?php echo count($days_of_week); ?>" class="text-center table-secondary"><strong>Break</strong></td>
-                                        <?php else : ?>
-                                            <?php for ($day_idx = 0; $day_idx < count($days_of_week); $day_idx++) : ?>
+                                        <?php foreach ($days_of_week as $day_idx => $day): ?>
+                                            <td class="timetable-slot align-middle">
                                                 <?php
-                                                // Check if this cell should be skipped because of a rowspan from a double lesson above it.
-                                                $skip_cell = false;
-                                                if ($period_idx > 0) {
-                                                    $lesson_above = $teacher_timetable_by_period[$day_idx][$period_idx - 1] ?? null;
-                                                    if ($lesson_above && !empty($lesson_above['is_double'])) {
-                                                        // This logic needs to be robust. The simplest way is to check if the lesson in the previous period on the same day was a double.
-                                                        // However, the data structure might not be perfect. Let's check if the lesson ID matches.
-                                                        $current_lesson = $teacher_timetable_by_period[$day_idx][$period_idx] ?? null;
-                                                        if ($current_lesson && $lesson_above['id'] === $current_lesson['id']) {
-                                                             $skip_cell = true;
-                                                        }
-                                                    }
-                                                }
-                                                
-                                                // A better approach for skipping: check the lesson itself.
-                                                // The `get_timetable_from_db` in `timetable.php` duplicates the lesson entry for the second slot. Let's mimic that here for consistency.
-                                                // We need to rebuild the array first.
-                                                
                                                 $lesson = $teacher_timetable_by_period[$day_idx][$period_idx] ?? null;
-
-                                                // More reliable skip logic based on the logic from timetable.php
-                                                $lesson_above = ($period_idx > 0) ? ($teacher_timetable_by_period[$day_idx][$period_idx - 1] ?? null) : null;
-                                                if ($lesson_above && !empty($lesson_above['is_double']) && ($lesson_above['id'] ?? 'a') === ($lesson['id'] ?? 'b')) {
-                                                    // If the lesson above was a double and has the same ID as the current one, skip this cell.
-                                                    continue;
-                                                }
-
-                                                $rowspan = 1;
-                                                if ($lesson && !empty($lesson['is_double'])) {
-                                                    // Check if the next timeslot is not a break to prevent rowspan over a break row
-                                                    $is_next_slot_a_break = false;
-                                                    $current_timeslot_index = -1;
-                                                    
-                                                    $timeslots_values = array_values($timeslots);
-                                                    foreach ($timeslots_values as $index => $ts) {
-                                                        if ($ts['id'] === $timeslot['id']) {
-                                                            $current_timeslot_index = $index;
-                                                            break;
+                                                if ($lesson) {
+                                                    // If it's an array of lessons (co-teaching), display them all
+                                                    $lessons_to_display = is_array($lesson) && !isset($lesson['id']) ? $lesson : [$lesson];
+                                                    foreach ($lessons_to_display as $single_lesson) {
+                                                        if ($single_lesson) { // Check not null
+                                                            echo '<div class="lesson p-1 mb-1">';
+                                                            echo '<strong>' . htmlspecialchars($single_lesson['lesson_display_name']) . '</strong><br>';
+                                                            echo '<small>' . htmlspecialchars($single_lesson['class_name']) . '</small>';
+                                                            echo '</div>';
                                                         }
-                                                    }
-                                                    
-                                                    if ($current_timeslot_index !== -1 && isset($timeslots_values[$current_timeslot_index + 1])) {
-                                                        $next_timeslot = $timeslots_values[$current_timeslot_index + 1];
-                                                        if ($next_timeslot['is_break']) {
-                                                            $is_next_slot_a_break = true;
-                                                        }
-                                                    }
-                                                    
-                                                    if (!$is_next_slot_a_break) {
-                                                        $rowspan = 2;
                                                     }
                                                 }
                                                 ?>
-                                                <td class="timetable-slot align-middle" rowspan="<?php echo $rowspan; ?>">
-                                                    <?php if ($lesson): ?>
-                                                        <div class="lesson p-1 h-100 d-flex flex-column justify-content-center">
-                                                            <strong><?php echo htmlspecialchars($lesson['lesson_display_name']); ?></strong><br>
-                                                            <small><?php echo htmlspecialchars($lesson['class_name']); ?></small>
-                                                        </div>
-                                                    <?php endif; ?>
-                                                </td>
-                                            <?php endfor; // day_idx ?>
-                                            <?php $period_idx++; ?>
-                                        <?php endif; // is_break ?>
+                                            </td>
+                                        <?php endforeach; ?>
                                     </tr>
-                                <?php endforeach; // timeslots ?>
+                                <?php
+                                }
+                                // Check for any breaks at the very end of the day
+                                $last_timeslot_end_time = end($non_break_periods)['end_time'];
+                                $final_break_html = '';
+                                foreach ($timeslots as $ts) {
+                                    if ($ts['is_break'] && $ts['start_time'] >= $last_timeslot_end_time) {
+                                        $final_break_html .= '<tr>';
+                                        $final_break_html .= '<td><strong>' . htmlspecialchars($ts['name']) . '</strong><br><small class="text-muted">' . date("g:i A", strtotime($ts['start_time'])) . ' - ' . date("g:i A", strtotime($ts['end_time'])) . '</small></td>';
+                                        $final_break_html .= '<td colspan="' . count($days_of_week) . '" class="text-center table-secondary"><strong>Break</strong></td>';
+                                        $final_break_html .= '</tr>';
+                                    }
+                                }
+                                echo $final_break_html;
+                                ?>
                             </tbody>
                         </table>
                     </div>

@@ -119,16 +119,21 @@ function generate_timetable($data, $days_of_week) {
     // 4. Placement
     $lessons_placed = 0;
     $lessons_failed = 0;
+    $period_popularity = array_fill(0, $periods_per_day, 0);
     foreach ($lessons_to_schedule as $index => $lesson) {
         $lesson_label = $lesson['display_name'] . (is_array($lesson['class_id']) ? ' for ' . count($lesson['class_id']) . ' classes' : ' for class ' . $lesson['class_id']);
         error_log("generate_timetable: Attempting to place lesson #" . ($index + 1) . ": " . $lesson_label);
         
-        $best_slot = find_best_slot_for_lesson($lesson, $class_timetables, $teacher_timetables, $days_of_week, $periods_per_day, $data['workloads'], $data['timeslots']);
+        $best_slot = find_best_slot_for_lesson($lesson, $class_timetables, $teacher_timetables, $days_of_week, $periods_per_day, $data['workloads'], $data['timeslots'], $period_popularity);
 
         if ($best_slot) {
             $lessons_placed++;
             $day = $best_slot['day'];
             $period = $best_slot['period'];
+            $period_popularity[$period]++;
+            if ($lesson['is_double']) {
+                $period_popularity[$period + 1]++;
+            }
             error_log("generate_timetable: Found best slot for lesson #" . ($index + 1) . " at Day $day, Period $period.");
             
             if ($lesson['type'] === 'single') {
@@ -190,7 +195,7 @@ function generate_timetable($data, $days_of_week) {
     return $class_timetables;
 }
 
-function find_best_slot_for_lesson($lesson, &$class_timetables, &$teacher_timetables, $days_of_week, $periods_per_day, $workloads, $all_timeslots) {
+function find_best_slot_for_lesson($lesson, &$class_timetables, &$teacher_timetables, $days_of_week, $periods_per_day, $workloads, $all_timeslots, $period_popularity) {
     $best_slot = null;
     $best_score = -1;
 
@@ -304,6 +309,9 @@ function find_best_slot_for_lesson($lesson, &$class_timetables, &$teacher_timeta
                         $current_score -= 15;
                     }
                 }
+
+                // Rule 4: Penalize placing in a timeslot that is already popular across all classes
+                $current_score -= $period_popularity[$period] * 5;
 
                 if ($current_score > $best_score) {
                     $best_score = $current_score;
