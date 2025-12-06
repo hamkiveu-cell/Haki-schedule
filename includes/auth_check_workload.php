@@ -1,7 +1,7 @@
 <?php
 session_start();
 
-require_once __DIR__ . '/db/config.php';
+require_once __DIR__ . '/../db/config.php';
 
 // If user is not logged in, redirect to login page
 if (!isset($_SESSION['user_id'])) {

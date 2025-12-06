@@ -204,8 +204,8 @@ function save_timetable($pdo, $class_timetables, $timeslots) {
     try {
         $pdo->beginTransaction();
         $pdo->exec('SET FOREIGN_KEY_CHECKS=0');
-        $pdo->exec('TRUNCATE TABLE schedule_teachers');
-        $pdo->exec('TRUNCATE TABLE schedules');
+        $pdo->exec('DELETE FROM schedule_teachers');
+        $pdo->exec('DELETE FROM schedules');
         $pdo->exec('SET FOREIGN_KEY_CHECKS=1');
 
         $stmt = $pdo->prepare(

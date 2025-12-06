@@ -33,33 +33,7 @@ if ($role === 'teacher') {
     <link rel="stylesheet" href="assets/css/custom.css?v=<?php echo time(); ?>">
 </head>
 <body>
-    <nav class="navbar navbar-expand-lg navbar-light bg-white sticky-top shadow-sm">
-        <div class="container">
-            <a class="navbar-brand fw-bold" href="dashboard.php">Haki Schedule</a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav ms-auto">
-                    <?php if ($role === 'admin'): ?>
-                        <li class="nav-item"><a class="nav-link" href="admin_classes.php">Classes</a></li>
-                        <li class="nav-item"><a class="nav-link" href="admin_subjects.php">Subjects</a></li>
-                        <li class="nav-item"><a class="nav-link" href="admin_teachers.php">Teachers</a></li>
-                        <li class="nav-item"><a class="nav-link" href="admin_workloads.php">Workloads</a></li>
-                        <li class="nav-item"><a class="nav-link" href="admin_timeslots.php">Timeslots</a></li>
-                        <li class="nav-item"><a class="nav-link" href="timetable.php">Class Timetable</a></li>
-                        <li class="nav-item"><a class="nav-link" href="teacher_timetable.php">Teacher Timetable</a></li>
-                    <?php else: ?>
-                        <li class="nav-item"><a class="nav-link" href="teacher_timetable.php">My Timetable</a></li>
-                        <?php if ($can_edit_workload): ?>
-                            <li class="nav-item"><a class="nav-link" href="teacher_workload.php">My Workload</a></li>
-                        <?php endif; ?>
-                    <?php endif; ?>
-                    <li class="nav-item"><a class="nav-link" href="logout.php">Logout</a></li>
-                </ul>
-            </div>
-        </div>
-    </nav>
+    <?php require_once __DIR__ . '/includes/navbar.php'; ?>
 
     <main class="container py-5">
         <h1 class="h3 fw-bold">Welcome, <?php echo htmlspecialchars($_SESSION['username']); ?>!</h1>

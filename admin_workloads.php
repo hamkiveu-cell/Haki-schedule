@@ -2,6 +2,8 @@
 require_once __DIR__ . '/includes/auth_check.php';
 require_once __DIR__ . '/db/config.php';
 
+
+
 $message = '';
 $error = '';
 $pdo = db();
@@ -11,6 +13,8 @@ $school_id = $_SESSION['school_id'];
 // Handle Delete request
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_id'])) {
     try {
+        // First, remove teacher from schedule
+
         $stmt = $pdo->prepare("DELETE FROM workloads WHERE id = ? AND school_id = ?");
         if ($stmt->execute([$_POST['delete_id'], $school_id])) {
             $message = 'Workload deleted successfully!';
@@ -45,6 +49,7 @@ elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else { // Insert
                 $stmt = $pdo->prepare("INSERT INTO workloads (class_id, subject_id, teacher_id, lessons_per_week, school_id) VALUES (?, ?, ?, ?, ?)");
                 if ($stmt->execute([$class_id, $subject_id, $teacher_id, $lessons_per_week, $school_id])) {
+                    $new_workload_id = $pdo->lastInsertId();
                     $message = 'Workload created successfully!';
                 } else {
                     $error = 'Failed to create workload.';

@@ -94,12 +94,12 @@ try {
 $workloads = [];
 try {
     $workloads_stmt = $pdo->prepare("
-        SELECT w.id, c.name as class_name, s.name as subject_name, w.lessons_per_week, w.created_at, w.class_id, w.subject_id
+        SELECT w.id, c.name as class_name, s.name as subject_name, w.lessons_per_week, w.class_id, w.subject_id
         FROM workloads w
         JOIN classes c ON w.class_id = c.id
         JOIN subjects s ON w.subject_id = s.id
         WHERE w.teacher_id = ? AND w.school_id = ?
-        ORDER BY w.created_at DESC
+        ORDER BY c.name, s.name
     ");
     $workloads_stmt->execute([$teacher_id, $school_id]);
     $workloads = $workloads_stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -120,22 +120,7 @@ try {
 </head>
 <body>
 
-    <nav class="navbar navbar-expand-lg navbar-light bg-white sticky-top shadow-sm">
-        <div class="container">
-            <a class="navbar-brand fw-bold" href="dashboard.php">Haki Schedule</a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav ms-auto">
-                    <li class="nav-item"><a class="nav-link" href="dashboard.php">Dashboard</a></li>
-                    <li class="nav-item"><a class="nav-link active" href="teacher_workload.php">My Workload</a></li>
-                    <li class="nav-item"><a class="nav-link" href="teacher_timetable.php">My Timetable</a></li>
-                    <li class="nav-item"><a class="nav-link" href="logout.php">Logout</a></li>
-                </ul>
-            </div>
-        </div>
-    </nav>
+    <?php require_once __DIR__ . '/includes/navbar.php'; ?>
 
     <main class="container py-5">
         <div class="row justify-content-center">

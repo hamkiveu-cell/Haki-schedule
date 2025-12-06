@@ -12,38 +12,7 @@
 </head>
 <body>
 
-    <nav class="navbar navbar-expand-lg navbar-light bg-white sticky-top shadow-sm">
-        <div class="container">
-            <a class="navbar-brand fw-bold" href="/">Haki Schedule</a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav ms-auto">
-                    <li class="nav-item"><a class="nav-link active" href="/">Home</a></li>
-                    <?php if (isset($_SESSION['user_id'])): ?>
-                        <li class="nav-item dropdown">
-                            <a class="nav-link dropdown-toggle" href="#" id="manageDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                                Manage
-                            </a>
-                            <ul class="dropdown-menu" aria-labelledby="manageDropdown">
-                                <li><a class="dropdown-item" href="/admin_classes.php">Classes</a></li>
-                                <li><a class="dropdown-item" href="/admin_subjects.php">Subjects</a></li>
-                                <li><a class="dropdown-item" href="/admin_teachers.php">Teachers</a></li>
-                                <li><a class="dropdown-item" href="/admin_workloads.php">Workloads</a></li>
-                            </ul>
-                        </li>
-                        <li class="nav-item"><a class="nav-link" href="/timetable.php">Timetable</a></li>
-                        <li class="nav-item"><a class="nav-link" href="/logout.php">Logout</a></li>
-                    <?php else: ?>
-                        <li class="nav-item"><a class="nav-link" href="/demo.php">Demo</a></li>
-                        <li class="nav-item"><a class="nav-link" href="/login.php">Login</a></li>
-                        <li class="nav-item"><a class="nav-link" href="/register.php">Register</a></li>
-                    <?php endif; ?>
-                </ul>
-            </div>
-        </div>
-    </nav>
+    <?php require_once __DIR__ . '/includes/navbar.php'; ?>
 
     <header class="hero-section text-white text-center">
         <div class="container">
