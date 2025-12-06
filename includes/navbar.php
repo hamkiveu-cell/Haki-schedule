@@ -27,6 +27,7 @@ $role = $_SESSION['role'] ?? '';
                                 <li><a class="dropdown-item" href="/admin_timeslots.php">Timeslots</a></li>
                                 <li><a class="dropdown-item" href="/admin_elective_groups.php">Elective Groups</a></li>
                                 <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item" href="/admin_school_settings.php">School Settings</a></li>
                                 <li><a class="dropdown-item" href="/admin_data_management.php">Data Management</a></li>
                             </ul>
                         </li>

@@ -405,7 +405,7 @@ function save_timetable($pdo, $class_timetables, $timeslots) {
     }
 }
 
-function get_timetable_from_db($pdo, $classes, $timeslots) {
+function get_timetable_from_db($pdo, $classes, $timeslots, $days_of_week) {
     $stmt = $pdo->query('SELECT * FROM schedules ORDER BY id');
     $saved_lessons = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
@@ -413,7 +413,6 @@ function get_timetable_from_db($pdo, $classes, $timeslots) {
         return [];
     }
 
-    $days_of_week = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
     $periods = array_values(array_filter($timeslots, function($ts) { return !$ts['is_break']; }));
     $periods_per_day = count($periods);
 
@@ -470,7 +469,18 @@ $classes = $all_data['classes'];
 $timeslots = $all_data['timeslots'];
 $workloads = $all_data['workloads'];
 
-$days_of_week = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+// Fetch working days from school settings
+$school_id = $_SESSION['school_id'] ?? null;
+$days_of_week = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']; // Default
+if ($school_id) {
+    $stmt = $pdoconn->prepare("SELECT working_days FROM schools WHERE id = ?");
+    $stmt->execute([$school_id]);
+    $school_settings = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($school_settings && !empty($school_settings['working_days'])) {
+        $days_of_week = explode(',', $school_settings['working_days']);
+    }
+}
+
 $class_timetables = [];
 
 if (isset($_POST['generate'])) {
@@ -484,7 +494,7 @@ if (isset($_POST['generate'])) {
 }
 
 // Always fetch the latest timetable from the database for display
-$class_timetables = get_timetable_from_db($pdoconn, $classes, $timeslots);
+$class_timetables = get_timetable_from_db($pdoconn, $classes, $timeslots, $days_of_week);
 ?>
 <!DOCTYPE html>
 <html lang="en">

@@ -1,0 +1,1 @@
+ALTER TABLE `schools` ADD COLUMN `working_days` VARCHAR(255) NOT NULL DEFAULT 'Monday,Tuesday,Wednesday,Thursday,Friday';
