@@ -29,14 +29,18 @@ $role = $_SESSION['role'] ?? '';
                                 <li><a class="dropdown-item" href="/admin_data_management.php">Data Management</a></li>
                             </ul>
                         </li>
+                    <?php endif; ?>
+
+                    <?php if ($role === 'admin' || $role === 'teacher'): ?>
                         <li class="nav-item"><a class="nav-link <?php echo ($current_page == 'timetable.php') ? 'active' : ''; ?>" href="/timetable.php">Class Timetable</a></li>
                     <?php endif; ?>
 
-                    <?php if ($role === 'teacher' && !empty($_SESSION['can_edit_workload'])): ?>
-                        <li class="nav-item"><a class="nav-link <?php echo ($current_page == 'teacher_workload.php') ? 'active' : ''; ?>" href="/teacher_workload.php">My Workload</a></li>
+                    <?php if ($role === 'teacher'): ?>
+                        <?php if (!empty($_SESSION['can_edit_workload'])): ?>
+                            <li class="nav-item"><a class="nav-link <?php echo ($current_page == 'teacher_workload.php') ? 'active' : ''; ?>" href="/teacher_workload.php">My Workload</a></li>
+                        <?php endif; ?>
+                        <li class="nav-item"><a class="nav-link <?php echo ($current_page == 'teacher_timetable.php') ? 'active' : ''; ?>" href="/teacher_timetable.php">My Timetable</a></li>
                     <?php endif; ?>
-
-                    <li class="nav-item"><a class="nav-link <?php echo ($current_page == 'teacher_timetable.php') ? 'active' : ''; ?>" href="/teacher_timetable.php">Teacher Timetable</a></li>
                     <li class="nav-item"><a class="nav-link" href="/logout.php">Logout</a></li>
                 <?php else : ?>
                     <li class="nav-item"><a class="nav-link <?php echo ($current_page == 'demo.php') ? 'active' : ''; ?>" href="/demo.php">Demo</a></li>
