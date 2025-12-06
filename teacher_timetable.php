@@ -82,7 +82,7 @@ if ($selected_teacher_id) {
 // Organize schedule for easy display
 $teacher_timetable = [];
 foreach ($teacher_schedule_raw as $lesson) {
-    $day_idx = $lesson['day_of_week'] - 1; // Days are 1-5, array is 0-4
+    $day_idx = $lesson['day_of_week']; // Use the 0-indexed value directly
     if (!isset($teacher_timetable[$day_idx])) {
         $teacher_timetable[$day_idx] = [];
     }
