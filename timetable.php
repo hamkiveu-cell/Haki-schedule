@@ -477,7 +477,10 @@ if ($school_id) {
     $stmt->execute([$school_id]);
     $school_settings = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($school_settings && !empty($school_settings['working_days'])) {
-        $days_of_week = explode(',', $school_settings['working_days']);
+        $days_from_db = explode(',', $school_settings['working_days']);
+        // Filter the days to ensure only valid weekdays are included, up to Friday.
+        $valid_days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+        $days_of_week = array_intersect($days_from_db, $valid_days);
     }
 }
 
