@@ -477,7 +477,7 @@ if ($school_id) {
     $stmt->execute([$school_id]);
     $school_settings = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($school_settings && !empty($school_settings['working_days'])) {
-        $days_from_db = explode(',', $school_settings['working_days']);
+        $days_from_db = array_map('trim', explode(',', $school_settings['working_days']));
         // Filter the days to ensure only valid weekdays are included, up to Friday.
         $valid_days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
         $days_of_week = array_intersect($days_from_db, $valid_days);
@@ -554,6 +554,7 @@ $class_timetables = get_timetable_from_db($pdoconn, $classes, $timeslots, $days_
                                     <tbody>
                                         <?php
                                         $period_idx = 0;
+                                        $day_name_to_index = array_flip(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']);
                                         foreach ($timeslots as $timeslot) :
                                         ?>
                                             <tr>
@@ -564,8 +565,10 @@ $class_timetables = get_timetable_from_db($pdoconn, $classes, $timeslots, $days_
                                                 <?php if ($timeslot['is_break']) : ?>
                                                     <td colspan="<?php echo count($days_of_week); ?>" class="text-center table-secondary"><strong>Break</strong></td>
                                                 <?php else : ?>
-                                                    <?php for ($day_idx = 0; $day_idx < count($days_of_week); $day_idx++) : ?>
+                                                    <?php foreach ($days_of_week as $day_name) : ?>
                                                         <?php
+                                                        if (!isset($day_name_to_index[$day_name])) continue;
+                                                        $day_idx = $day_name_to_index[$day_name];
                                                         $lesson = $class_timetables[$class['id']][$day_idx][$period_idx] ?? null;
 
                                                         // Logic to determine if cell should be skipped
@@ -613,7 +616,7 @@ $class_timetables = get_timetable_from_db($pdoconn, $classes, $timeslots, $days_
                                                                 </div>
                                                             <?php endif; ?>
                                                         </td>
-                                                    <?php endfor; // day_idx ?>
+                                                    <?php endforeach; // day_name ?>
                                                     <?php $period_idx++; ?>
                                                 <?php endif; // is_break ?>
                                             </tr>
