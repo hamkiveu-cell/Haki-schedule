@@ -72,6 +72,11 @@ if ($selected_teacher_id) {
         }
     }
     $teacher_schedule_raw = get_teacher_schedule($pdoconn, $selected_teacher_id, $school_id);
+    
+    // Gemini: Log the data for debugging
+    error_log("--- Teacher Timetable Debug ---");
+    error_log("Selected Teacher ID: " . print_r($selected_teacher_id, true));
+    error_log("Raw schedule data from DB: " . print_r($teacher_schedule_raw, true));
 }
 
 // Organize schedule for easy display
