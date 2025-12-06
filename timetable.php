@@ -316,9 +316,15 @@ function save_timetable($pdo, $class_timetables, $timeslots) {
 }
 
 function get_timetable_from_db($pdo, $classes, $timeslots) {
+    error_log("get_timetable_from_db: Fetching saved lessons...");
     $stmt = $pdo->query('SELECT * FROM schedules ORDER BY id');
     $saved_lessons = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    if (empty($saved_lessons)) return [];
+    
+    if (empty($saved_lessons)) {
+        error_log("get_timetable_from_db: No saved lessons found in the database.");
+        return [];
+    }
+    error_log("get_timetable_from_db: Found " . count($saved_lessons) . " saved lesson records.");
 
     $days_of_week = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
     $periods = array_values(array_filter($timeslots, function($ts) { return !$ts['is_break']; }));
@@ -333,13 +339,22 @@ function get_timetable_from_db($pdo, $classes, $timeslots) {
     foreach($periods as $idx => $period) {
         $timeslot_id_to_period_idx[$period['id']] = $idx;
     }
+    error_log("get_timetable_from_db: Timeslot to Period Index Map: " . print_r($timeslot_id_to_period_idx, true));
+
 
     foreach ($saved_lessons as $lesson) {
         $class_id = $lesson['class_id'];
         $day_idx = $lesson['day_of_week'];
         $timeslot_id = $lesson['timeslot_id'];
 
-        if (!isset($timeslot_id_to_period_idx[$timeslot_id]) || !isset($class_timetables[$class_id])) continue;
+        if (!isset($timeslot_id_to_period_idx[$timeslot_id])) {
+            error_log("get_timetable_from_db: SKIPPING lesson ID {$lesson['id']} - could not find period index for timeslot ID {$timeslot_id}.");
+            continue;
+        }
+        if (!isset($class_timetables[$class_id])) {
+            error_log("get_timetable_from_db: SKIPPING lesson ID {$lesson['id']} - could not find class timetable for class ID {$class_id}.");
+            continue;
+        }
         
         $period_idx = $timeslot_id_to_period_idx[$timeslot_id];
 
@@ -356,6 +371,8 @@ function get_timetable_from_db($pdo, $classes, $timeslots) {
             $class_timetables[$class_id][$day_idx][$period_idx + 1] = $lesson_data;
         }
     }
+    
+    error_log("get_timetable_from_db: Final processed timetables structure: " . print_r($class_timetables, true));
     return $class_timetables;
 }
 
