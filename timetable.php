@@ -32,8 +32,10 @@ function get_all_data($pdo) {
 
 // --- Main Scheduling Engine ---
 function generate_timetable($data, $days_of_week) {
+    error_log("generate_timetable: Starting generation...");
     $periods = array_values(array_filter($data['timeslots'], function($ts) { return !$ts['is_break']; }));
     $periods_per_day = count($periods);
+    error_log("generate_timetable: Periods per day: $periods_per_day");
 
     // 1. Initialize Timetables
     $class_timetables = [];
@@ -44,6 +46,7 @@ function generate_timetable($data, $days_of_week) {
     foreach ($data['teachers'] as $teacher_id => $teacher_name) {
         $teacher_timetables[$teacher_id] = array_fill(0, count($days_of_week), array_fill(0, $periods_per_day, null));
     }
+    error_log("generate_timetable: Initialized " . count($class_timetables) . " class timetables and " . count($teacher_timetables) . " teacher timetables.");
 
     // 2. Prepare Lessons
     $lessons_to_schedule = [];
@@ -102,6 +105,8 @@ function generate_timetable($data, $days_of_week) {
         }
     }
     
+    error_log("generate_timetable: Prepared " . count($lessons_to_schedule) . " lessons to schedule.");
+
     // 3. Sort lessons (place doubles and electives first)
     usort($lessons_to_schedule, function($a, $b) {
         if ($b['is_double'] != $a['is_double']) return $b['is_double'] <=> $a['is_double'];
@@ -111,12 +116,19 @@ function generate_timetable($data, $days_of_week) {
     });
 
     // 4. Placement
-    foreach ($lessons_to_schedule as $lesson) {
+    $lessons_placed = 0;
+    $lessons_failed = 0;
+    foreach ($lessons_to_schedule as $index => $lesson) {
+        $lesson_label = $lesson['display_name'] . (is_array($lesson['class_id']) ? ' for ' . count($lesson['class_id']) . ' classes' : ' for class ' . $lesson['class_id']);
+        error_log("generate_timetable: Attempting to place lesson #" . ($index + 1) . ": " . $lesson_label);
+        
         $best_slot = find_best_slot_for_lesson($lesson, $class_timetables, $teacher_timetables, $days_of_week, $periods_per_day);
 
         if ($best_slot) {
+            $lessons_placed++;
             $day = $best_slot['day'];
             $period = $best_slot['period'];
+            error_log("generate_timetable: Found best slot for lesson #" . ($index + 1) . " at Day $day, Period $period.");
             
             if ($lesson['type'] === 'single') {
                 $class_id = $lesson['class_id'];
@@ -160,9 +172,13 @@ function generate_timetable($data, $days_of_week) {
                     }
                 }
             }
+        } else {
+            $lessons_failed++;
+            error_log("generate_timetable: FAILED to find slot for lesson #" . ($index + 1) . ": " . $lesson_label);
         }
     }
 
+    error_log("generate_timetable: Placement complete. Placed: $lessons_placed, Failed: $lessons_failed.");
     return $class_timetables;
 }
 
@@ -178,6 +194,11 @@ function find_best_slot_for_lesson($lesson, &$class_timetables, &$teacher_timeta
             // Check availability for all classes and teachers
             $slot_available = true;
             foreach ($class_ids as $cid) {
+                if (!isset($class_timetables[$cid])) {
+                    error_log("find_best_slot_for_lesson: Invalid class ID '$cid' found in a lesson.");
+                    $slot_available = false; 
+                    break;
+                }
                 if ($class_timetables[$cid][$day][$period] !== null || ($is_double && $class_timetables[$cid][$day][$period + 1] !== null)) {
                     $slot_available = false; break;
                 }
@@ -185,6 +206,11 @@ function find_best_slot_for_lesson($lesson, &$class_timetables, &$teacher_timeta
             if (!$slot_available) continue;
 
             foreach ($teacher_ids as $tid) {
+                if (!isset($teacher_timetables[$tid])) {
+                    error_log("find_best_slot_for_lesson: Invalid teacher ID '$tid' found in a lesson.");
+                    $slot_available = false; 
+                    break;
+                }
                 if ($teacher_timetables[$tid][$day][$period] !== null || ($is_double && $teacher_timetables[$tid][$day][$period + 1] !== null)) {
                     $slot_available = false; break;
                 }
@@ -201,12 +227,22 @@ function find_best_slot_for_lesson($lesson, &$class_timetables, &$teacher_timeta
 
 // --- Timetable Persistence ---
 function save_timetable($pdo, $class_timetables, $timeslots) {
+    if (empty($class_timetables)) {
+        error_log("save_timetable: Attempted to save an empty timetable. Aborting.");
+        return;
+    }
+    error_log("save_timetable: Starting timetable save process.");
+
     try {
         $pdo->beginTransaction();
-        $pdo->exec('SET FOREIGN_KEY_CHECKS=0');
+        error_log("save_timetable: Transaction started.");
+
+        // It's better to delete from the child table first to avoid foreign key issues.
         $pdo->exec('DELETE FROM schedule_teachers');
+        error_log("save_timetable: Deleted data from schedule_teachers.");
+
         $pdo->exec('DELETE FROM schedules');
-        $pdo->exec('SET FOREIGN_KEY_CHECKS=1');
+        error_log("save_timetable: Deleted data from schedules.");
 
         $stmt = $pdo->prepare(
             'INSERT INTO schedules (class_id, day_of_week, timeslot_id, subject_id, lesson_display_name, teacher_display_name, is_double, is_elective) ' .
@@ -223,9 +259,13 @@ function save_timetable($pdo, $class_timetables, $timeslots) {
                 $processed_periods = [];
                 foreach ($period_schedule as $period_idx => $lesson) {
                     if ($lesson && !in_array($period_idx, $processed_periods)) {
+                        if (!isset($lesson_periods[$period_idx]['id'])) {
+                            error_log("save_timetable: Missing timeslot for period index {$period_idx}. Skipping lesson.");
+                            continue;
+                        }
                         $timeslot_id = $lesson_periods[$period_idx]['id'];
                         
-                        $display_name = $lesson['is_elective'] ? ($lesson['group_name'] . ' / ' . $lesson['subject_name']) : $lesson['subject_name'];
+                        $display_name = !empty($lesson['is_elective']) ? ($lesson['group_name'] . ' / ' . $lesson['subject_name']) : $lesson['subject_name'];
 
                         $stmt->execute([
                             ':class_id' => $class_id,
@@ -240,8 +280,10 @@ function save_timetable($pdo, $class_timetables, $timeslots) {
 
                         $schedule_id = $pdo->lastInsertId();
 
-                        foreach ($lesson['teacher_ids'] as $teacher_id) {
-                            $teacher_stmt->execute([':schedule_id' => $schedule_id, ':teacher_id' => $teacher_id]);
+                        if (!empty($lesson['teacher_ids'])) {
+                            foreach ($lesson['teacher_ids'] as $teacher_id) {
+                                $teacher_stmt->execute([':schedule_id' => $schedule_id, ':teacher_id' => $teacher_id]);
+                            }
                         }
 
                         $processed_periods[] = $period_idx;
@@ -252,10 +294,24 @@ function save_timetable($pdo, $class_timetables, $timeslots) {
                 }
             }
         }
-        $pdo->commit();
+        
+        if ($pdo->inTransaction()) {
+            $pdo->commit();
+            error_log("save_timetable: Timetable save completed successfully. Transaction committed.");
+        } else {
+            error_log("save_timetable: Warning: No active transaction to commit.");
+        }
+
     } catch (Exception $e) {
-        $pdo->rollBack();
-        error_log("Timetable save failed: " . $e->getMessage());
+        error_log("save_timetable: An exception occurred. " . $e->getMessage());
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+            error_log("save_timetable: Transaction rolled back.");
+        } else {
+            error_log("save_timetable: No active transaction to roll back.");
+        }
+        // Re-throw the exception to see the error on the screen if display_errors is on
+        throw $e;
     }
 }
 
@@ -391,8 +447,8 @@ if (isset($_POST['generate'])) {
                                                             $lesson = $class_timetables[$class['id']][$day_idx][$period_idx] ?? null;
                                                             if ($lesson) :
                                                                 $css_class = 'lesson p-1';
-                                                                if ($lesson['is_elective']) $css_class .= ' is-elective';
-                                                                if ($lesson['is_double']) $css_class .= ' is-double';
+                                                                if (!empty($lesson['is_elective'])) $css_class .= ' is-elective';
+                                                                if (!empty($lesson['is_double'])) $css_class .= ' is-double';
                                                             ?>
                                                                 <div class="<?php echo $css_class; ?>" data-lesson-id="<?php echo $lesson['id'] ?? ''; ?>">
                                                                     <strong><?php echo htmlspecialchars($lesson['subject_name']); ?></strong><br>

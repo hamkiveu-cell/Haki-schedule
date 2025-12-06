@@ -1,4 +1,5 @@
 <?php
+error_log("Navbar role check: " . ($_SESSION['role'] ?? 'not set'));
 // Note: This file assumes session_start() has been called by the including file.
 $current_page = basename($_SERVER['SCRIPT_NAME']);
 $role = $_SESSION['role'] ?? '';
