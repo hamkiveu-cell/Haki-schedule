@@ -507,7 +507,9 @@ if (isset($_POST['generate'])) {
 
 // Always fetch the latest timetable from the database for display
 $class_timetables = get_timetable_from_db($pdoconn, $classes, $timeslots, $days_of_week);
+
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -517,21 +519,24 @@ $class_timetables = get_timetable_from_db($pdoconn, $classes, $timeslots, $days_
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/custom.css?v=<?php echo time(); ?>">
     <style>
+        .lesson { min-height: 60px; }
         .lesson.is-elective { background-color: #e0f7fa; border-left: 3px solid #00bcd4; }
         .lesson.is-double { background-color: #fce4ec; }
+        .table-bordered th, .table-bordered td { vertical-align: middle; }
         @media print {
             body * { visibility: hidden; }
             #timetables-container, #timetables-container * { visibility: visible; }
             #timetables-container { position: absolute; left: 0; top: 0; width: 100%; }
             .card { border: 1px solid #dee2e6 !important; box-shadow: none !important; }
+            .d-flex.gap-2 { display: none !important; }
         }
     </style>
 </head>
 <body>
     <?php include 'includes/navbar.php'; ?>
 
-    <div class="container mt-4">
-        <div class="d-flex justify-content-between align-items-center mb-4">
+    <div class="container-fluid mt-4">
+        <div class="d-flex justify-content-between align-items-center mb-4 px-3">
             <h1>Class Timetable</h1>
             <div class="d-flex gap-2">
                 <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin') : ?>
@@ -544,11 +549,32 @@ $class_timetables = get_timetable_from_db($pdoconn, $classes, $timeslots, $days_
         </div>
 
         <div id="timetables-container">
-            <?php if (!empty($class_timetables)) : ?>
+            <?php if (empty($class_timetables)) : ?>
+                <div class="alert alert-info mx-3">
+                    <?php if (empty($workloads)) : ?>
+                        No workloads found. Please add classes, subjects, teachers, and workloads in the "Manage" section first. The "Generate Timetable" button is disabled.
+                    <?php else : ?>
+                        Click the "Generate Timetable" button to create a schedule.
+                    <?php endif; ?>
+                </div>
+            <?php else : ?>
+                <?php
+                // This map is crucial for finding the correct lesson in the data array.
+                $lesson_periods = array_values(array_filter($timeslots, function($ts) { return !$ts['is_break']; }));
+                $timeslot_id_to_period_idx = [];
+                foreach($lesson_periods as $idx => $period) {
+                    $timeslot_id_to_period_idx[$period['id']] = $idx;
+                }
+                ?>
                 <?php foreach ($classes as $class) : ?>
-                    <?php if (!isset($class_timetables[$class['id']])) continue; ?>
+                    <?php
+                    // Skip rendering a table if there's no schedule for this class
+                    if (!isset($class_timetables[$class['id']]) || empty(array_filter(array_merge(...$class_timetables[$class['id']])))) {
+                        continue;
+                    }
+                    ?>
                     <div class="timetable-wrapper mb-5">
-                        <h3 class="mt-5"><?php echo htmlspecialchars($class['name']); ?></h3>
+                        <h3 class="mt-5 px-3"><?php echo htmlspecialchars($class['name']); ?></h3>
                         <div class="card">
                             <div class="card-body">
                                 <table class="table table-bordered text-center">
@@ -562,68 +588,61 @@ $class_timetables = get_timetable_from_db($pdoconn, $classes, $timeslots, $days_
                                     </thead>
                                     <tbody>
                                         <?php
-                                        $period_idx = 0;
-                                        foreach ($timeslots as $timeslot) :
+                                        // This array will track which cells to skip due to a rowspan from a double lesson
+                                        $skip_cells = [];
+
+                                        foreach ($timeslots as $timeslot_index => $timeslot) :
                                         ?>
                                             <tr>
                                                 <td>
                                                     <strong><?php echo htmlspecialchars($timeslot['name']); ?></strong><br>
                                                     <small class="text-muted"><?php echo date("g:i A", strtotime($timeslot['start_time'])); ?> - <?php echo date("g:i A", strtotime($timeslot['end_time'])); ?></small>
                                                 </td>
+
                                                 <?php if ($timeslot['is_break']) : ?>
                                                     <td colspan="<?php echo count($days_of_week); ?>" class="text-center table-secondary"><strong>Break</strong></td>
                                                 <?php else : ?>
-                                                    <?php foreach ($days_of_week as $day_idx => $day_name) : ?>
-                                                        <?php
-                                                        $lesson = $class_timetables[$class['id']][$day_idx][$period_idx] ?? null;
+                                                    <?php
+                                                    // Get the correct index for the current non-break period
+                                                    $current_period_idx = $timeslot_id_to_period_idx[$timeslot['id']] ?? -1;
 
-                                                        // Logic to determine if cell should be skipped
-                                                        $lesson_above = ($period_idx > 0) ? ($class_timetables[$class['id']][$day_idx][$period_idx - 1] ?? null) : null;
-                                                        if ($lesson_above && !empty($lesson_above['is_double']) && ($lesson_above['id'] ?? 'a') === ($lesson['id'] ?? 'b')) {
-                                                            continue; // This is the fix: skip the cell entirely
-                                                        }
+                                                    if ($current_period_idx !== -1) {
+                                                        foreach ($days_of_week as $day_idx => $day_name) {
+                                                            // If the cell is marked to be skipped by a rowspan above, do nothing and continue
+                                                            if (!empty($skip_cells[$day_idx][$current_period_idx])) {
+                                                                continue;
+                                                            }
 
-                                                        $rowspan = 1;
-                                                        if ($lesson && !empty($lesson['is_double'])) {
-                                                            // Check if the next timeslot is not a break to prevent rowspan over a break row
-                                                            $is_next_slot_a_break = false;
-                                                            $current_timeslot_index = -1;
-                                                            
-                                                            $timeslots_values = array_values($timeslots);
-                                                            foreach ($timeslots_values as $index => $ts) {
-                                                                if ($ts['id'] === $timeslot['id']) {
-                                                                    $current_timeslot_index = $index;
-                                                                    break;
+                                                            $lesson = $class_timetables[$class['id']][$day_idx][$current_period_idx] ?? null;
+                                                            $rowspan = 1;
+
+                                                            if ($lesson && !empty($lesson['is_double'])) {
+                                                                // Check if the next timeslot is also not a break
+                                                                $next_timeslot_is_break = isset($timeslots[$timeslot_index + 1]) && $timeslots[$timeslot_index + 1]['is_break'];
+                                                                if (!$next_timeslot_is_break) {
+                                                                    $rowspan = 2;
+                                                                    // Mark the cell below this one to be skipped in the next iteration
+                                                                    $next_period_idx = $current_period_idx + 1;
+                                                                    $skip_cells[$day_idx][$next_period_idx] = true;
                                                                 }
                                                             }
-                                                            
-                                                            if ($current_timeslot_index !== -1 && isset($timeslots_values[$current_timeslot_index + 1])) {
-                                                                $next_timeslot = $timeslots_values[$current_timeslot_index + 1];
-                                                                if ($next_timeslot['is_break']) {
-                                                                    $is_next_slot_a_break = true;
-                                                                }
-                                                            }
-                                                            
-                                                            if (!$is_next_slot_a_break) {
-                                                                $rowspan = 2;
-                                                            }
-                                                        }
-                                                        ?>
-                                                        <td class="timetable-slot align-middle" rowspan="<?php echo $rowspan; ?>">
-                                                            <?php
-                                                            if ($lesson) :
-                                                                $css_class = 'lesson p-1 h-100 d-flex flex-column justify-content-center';
-                                                                if (!empty($lesson['is_elective'])) $css_class .= ' is-elective';
-                                                                if (!empty($lesson['is_double'])) $css_class .= ' is-double';
                                                             ?>
-                                                                <div class="<?php echo $css_class; ?>" data-lesson-id="<?php echo $lesson['id'] ?? ''; ?>">
-                                                                    <strong><?php echo htmlspecialchars($lesson['subject_name']); ?></strong><br>
-                                                                    <small><?php echo htmlspecialchars($lesson['teacher_name']); ?></small>
-                                                                </div>
-                                                            <?php endif; ?>
-                                                        </td>
-                                                    <?php endforeach; // day_name ?>
-                                                    <?php $period_idx++; ?>
+                                                            <td rowspan="<?php echo $rowspan; ?>">
+                                                                <?php if ($lesson) :
+                                                                    $css_class = 'lesson p-1 h-100 d-flex flex-column justify-content-center';
+                                                                    if (!empty($lesson['is_elective'])) $css_class .= ' is-elective';
+                                                                    if (!empty($lesson['is_double'])) $css_class .= ' is-double';
+                                                                ?>
+                                                                    <div class="<?php echo $css_class; ?>" data-lesson-id="<?php echo $lesson['id'] ?? ''; ?>">
+                                                                        <strong><?php echo htmlspecialchars($lesson['subject_name']); ?></strong><br>
+                                                                        <small><?php echo htmlspecialchars($lesson['teacher_name']); ?></small>
+                                                                    </div>
+                                                                <?php endif; ?>
+                                                            </td>
+                                                            <?php
+                                                        } // end foreach day
+                                                    } // end if period found
+                                                    ?>
                                                 <?php endif; // is_break ?>
                                             </tr>
                                         <?php endforeach; // timeslots ?>
@@ -632,16 +651,8 @@ $class_timetables = get_timetable_from_db($pdoconn, $classes, $timeslots, $days_
                             </div>
                         </div>
                     </div>
-                <?php endforeach; ?>
-            <?php else : ?>
-                <div class="alert alert-info">
-                    <?php if (empty($workloads)) : ?>
-                        No workloads found. Please add classes, subjects, teachers, and workloads in the "Manage" section first. The "Generate Timetable" button is disabled.
-                    <?php else : ?>
-                        Click the "Generate Timetable" button to create a schedule.
-                    <?php endif; ?>
-                </div>
-            <?php endif; ?>
+                <?php endforeach; // classes ?>
+            <?php endif; // empty timetables ?>
         </div>
 
     </div>
