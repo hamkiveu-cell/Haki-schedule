@@ -1,0 +1,79 @@
+@page {
+    size: landscape;
+    margin: 0.5cm; /* Reduce page margins */
+}
+
+/*
+    Simple, direct print styles for timetables, with AGGRESSIVE compression and landscape mode.
+*/
+
+/* 1. By default, hide everything when printing. */
+@media print {
+    body * {
+        visibility: hidden;
+    }
+
+    /* 2. Make ONLY the timetable containers and their contents visible. */
+    #timetables-container, #timetables-container *,
+    #timetable-container, #timetable-container * {
+        visibility: visible;
+    }
+
+    /* 3. Position the container to take up the whole page and scale it down SIGNIFICANTLY. */
+    #timetables-container,
+    #timetable-container {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        transform: scale(0.8); /* Aggressively scale down the entire container */
+        transform-origin: top left;
+    }
+
+    /* 4. Force each timetable to start on a new page. */
+    .timetable-wrapper {
+        page-break-after: always;
+        margin-top: 1rem;
+    }
+
+    /* 5. Don't add a page break after the very last one. */
+    .timetable-wrapper:last-child {
+        page-break-after: avoid;
+    }
+
+    /* 6. Ensure table fits the page and has basic styling. */
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 7pt; /* EXTREMELY reduced font size */
+    }
+
+    th, td {
+        border: 1px solid #666;
+        padding: 1px; /* MINIMAL padding */
+        text-align: center;
+        overflow-wrap: break-word; /* Break long words */
+    }
+
+    th {
+        background-color: #f0f0f0;
+    }
+
+    h3 {
+        text-align: center;
+        font-size: 10pt; /* Reduced header font size */
+        font-weight: bold;
+    }
+
+    /* 7. Explicitly hide any elements that should never be printed. */
+    .no-print, .navbar, #print-btn, form {
+        display: none !important;
+    }
+
+    /* Remove bootstrap card styling */
+    .card, .card-body {
+        border: none !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+    }
+}

@@ -140,34 +140,15 @@ error_log("Final teacher_timetable_by_period structure: " . print_r($teacher_tim
     <title>Teacher Timetable - Haki Schedule</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/custom.css?v=<?php echo time(); ?>">
+    <link rel="stylesheet" href="assets/css/print.css?v=<?php echo time(); ?>" media="print">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <style>
-        @media print {
-            body * {
-                visibility: hidden;
-            }
-            #timetable-container, #timetable-container * {
-                visibility: visible;
-            }
-            #timetable-container {
-                position: absolute;
-                left: 0;
-                top: 0;
-                width: 100%;
-            }
-            .card {
-                border: 1px solid #dee2e6 !important;
-                box-shadow: none !important;
-            }
-        }
-    </style>
 </head>
 <body>
     <?php require_once 'includes/navbar.php'; ?>
 
     <div class="container mt-4">
-        <div class="d-flex justify-content-between align-items-center mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-4 no-print">
             <h1>Teacher Timetable</h1>
             <?php if ($selected_teacher_id): ?>
             <div class="d-flex gap-2">
@@ -178,7 +159,7 @@ error_log("Final teacher_timetable_by_period structure: " . print_r($teacher_tim
         </div>
 
         <?php if ($role === 'admin'): ?>
-        <form method="GET" action="" class="mb-4">
+        <form method="GET" action="" class="mb-4 no-print">
             <div class="row">
                 <div class="col-md-4">
                     <label for="teacher_id" class="form-label">Select Teacher</label>
@@ -195,8 +176,9 @@ error_log("Final teacher_timetable_by_period structure: " . print_r($teacher_tim
         </form>
         <?php endif; ?>
 
-        <div id="timetable-container">
+        <div id="timetable-container" class="timetable-container">
             <?php if ($selected_teacher_id && !empty($teacher_schedule_raw)): ?>
+                <div class="timetable-wrapper">
                 <h3 class="mt-4">Timetable for <?php echo htmlspecialchars($selected_teacher_name); ?></h3>
                 <div class="card">
                     <div class="card-body">
@@ -294,6 +276,7 @@ error_log("Final teacher_timetable_by_period structure: " . print_r($teacher_tim
                             </tbody>
                         </table>
                     </div>
+                </div>
                 </div>
             <?php elseif ($selected_teacher_id): ?>
                 <div class="alert alert-info">No lessons scheduled for this teacher.</div>

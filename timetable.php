@@ -74,7 +74,7 @@ function generate_timetable($data, $days_of_week) {
             if (!isset($electives_by_group_grade[$key])) {
                 $electives_by_group_grade[$key] = [
                     'type' => 'elective_group',
-                    'display_name' => $workload['elective_group_name'] . " (Form " . $grade . ")",
+                    'display_name' => $workload['elective_group_name'],
                     'lessons_per_week' => $workload['lessons_per_week'],
                     'has_double_lesson' => $workload['has_double_lesson'],
                     'is_elective' => true,
@@ -526,25 +526,19 @@ $class_timetables = get_timetable_from_db($pdoconn, $classes, $timeslots, $days_
     <title>Timetable - Haki Schedule</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/custom.css?v=<?php echo time(); ?>">
+    <link rel="stylesheet" href="assets/css/print.css?v=<?php echo time(); ?>" media="print">
     <style>
         .lesson { min-height: 60px; }
         .lesson.is-elective { background-color: #e0f7fa; border-left: 3px solid #00bcd4; }
         .lesson.is-double { background-color: #fce4ec; }
         .table-bordered th, .table-bordered td { vertical-align: middle; }
-        @media print {
-            body * { visibility: hidden; }
-            #timetables-container, #timetables-container * { visibility: visible; }
-            #timetables-container { position: absolute; left: 0; top: 0; width: 100%; }
-            .card { border: 1px solid #dee2e6 !important; box-shadow: none !important; }
-            .d-flex.gap-2 { display: none !important; }
-        }
     </style>
 </head>
 <body>
     <?php include 'includes/navbar.php'; ?>
 
     <div class="container-fluid mt-4">
-        <div class="d-flex justify-content-between align-items-center mb-4 px-3">
+        <div class="d-flex justify-content-between align-items-center mb-4 px-3 no-print">
             <h1>Class Timetable</h1>
             <div class="d-flex gap-2">
                 <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin') : ?>
@@ -556,7 +550,7 @@ $class_timetables = get_timetable_from_db($pdoconn, $classes, $timeslots, $days_
             </div>
         </div>
 
-        <div id="timetables-container">
+        <div id="timetables-container" class="timetable-container">
             <?php if (empty($class_timetables)) : ?>
                 <div class="alert alert-info mx-3">
                     <?php if (empty($workloads)) : ?>
