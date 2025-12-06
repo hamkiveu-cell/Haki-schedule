@@ -122,7 +122,7 @@ function generate_timetable($data, $days_of_week) {
         $lesson_label = $lesson['display_name'] . (is_array($lesson['class_id']) ? ' for ' . count($lesson['class_id']) . ' classes' : ' for class ' . $lesson['class_id']);
         error_log("generate_timetable: Attempting to place lesson #" . ($index + 1) . ": " . $lesson_label);
         
-        $best_slot = find_best_slot_for_lesson($lesson, $class_timetables, $teacher_timetables, $days_of_week, $periods_per_day);
+        $best_slot = find_best_slot_for_lesson($lesson, $class_timetables, $teacher_timetables, $days_of_week, $periods_per_day, $data['workloads']);
 
         if ($best_slot) {
             $lessons_placed++;
@@ -182,46 +182,93 @@ function generate_timetable($data, $days_of_week) {
     return $class_timetables;
 }
 
-function find_best_slot_for_lesson($lesson, &$class_timetables, &$teacher_timetables, $days_of_week, $periods_per_day) {
+function find_best_slot_for_lesson($lesson, &$class_timetables, &$teacher_timetables, $days_of_week, $periods_per_day, $workloads) {
+    $best_slot = null;
+    $best_score = -1;
+
     $is_double = $lesson['is_double'];
     $class_ids = is_array($lesson['class_id']) ? $lesson['class_id'] : [$lesson['class_id']];
     $teacher_ids = $lesson['teacher_ids'];
+    $subject_id = $lesson['subject_id'];
+
+    // Rule 1: Get total lessons per week for this subject to check if we can repeat on the same day
+    $lessons_per_week_for_subject = 0;
+    if ($lesson['type'] === 'single') {
+        foreach ($workloads as $w) {
+            if ($w['class_id'] == $class_ids[0] && $w['subject_id'] == $subject_id) {
+                $lessons_per_week_for_subject = $w['lessons_per_week'];
+                break;
+            }
+        }
+    } else { // Elective group
+        $lessons_per_week_for_subject = $lesson['component_lessons'][0]['lessons_per_week'];
+    }
+
 
     for ($day = 0; $day < count($days_of_week); $day++) {
         for ($period = 0; $period < $periods_per_day; $period++) {
+            // Basic availability check
             if ($is_double && $period + 1 >= $periods_per_day) continue;
 
-            // Check availability for all classes and teachers
             $slot_available = true;
             foreach ($class_ids as $cid) {
-                if (!isset($class_timetables[$cid])) {
-                    error_log("find_best_slot_for_lesson: Invalid class ID '$cid' found in a lesson.");
-                    $slot_available = false; 
+                if (!isset($class_timetables[$cid]) || $class_timetables[$cid][$day][$period] !== null || ($is_double && $class_timetables[$cid][$day][$period + 1] !== null)) {
+                    $slot_available = false;
                     break;
-                }
-                if ($class_timetables[$cid][$day][$period] !== null || ($is_double && $class_timetables[$cid][$day][$period + 1] !== null)) {
-                    $slot_available = false; break;
                 }
             }
             if (!$slot_available) continue;
 
             foreach ($teacher_ids as $tid) {
-                if (!isset($teacher_timetables[$tid])) {
-                    error_log("find_best_slot_for_lesson: Invalid teacher ID '$tid' found in a lesson.");
-                    $slot_available = false; 
+                if (!isset($teacher_timetables[$tid]) || $teacher_timetables[$tid][$day][$period] !== null || ($is_double && $teacher_timetables[$tid][$day][$period + 1] !== null)) {
+                    $slot_available = false;
                     break;
                 }
-                if ($teacher_timetables[$tid][$day][$period] !== null || ($is_double && $teacher_timetables[$tid][$day][$period + 1] !== null)) {
-                    $slot_available = false; break;
-                }
             }
-            
+
             if ($slot_available) {
-                return ['day' => $day, 'period' => $period]; // Return first available slot (simplistic)
+                $current_score = 100; // Start with a base score for an available slot
+
+                // Rule 1: Penalize placing the same subject on the same day for a class
+                $subject_on_day_count = 0;
+                foreach ($class_ids as $cid) {
+                    for ($p = 0; $p < $periods_per_day; $p++) {
+                        $existing_lesson = $class_timetables[$cid][$day][$p];
+                        if ($existing_lesson !== null) {
+                            if ($lesson['type'] === 'single' && isset($existing_lesson['subject_id']) && $existing_lesson['subject_id'] == $subject_id) {
+                                $subject_on_day_count++;
+                            }
+                            // Check for electives by group name
+                            if ($lesson['type'] === 'elective_group' && isset($existing_lesson['group_name']) && $existing_lesson['group_name'] == $lesson['display_name']) {
+                                $subject_on_day_count++;
+                            }
+                        }
+                    }
+                }
+                
+                // Only apply penalty if the number of lessons is less than or equal to the number of days
+                if ($lessons_per_week_for_subject <= count($days_of_week)) {
+                    if ($subject_on_day_count > 0) {
+                        $current_score -= 50; // Heavy penalty
+                    }
+                } else {
+                    // If we must repeat, penalize stacking more than 2 in one day
+                    if ($subject_on_day_count > 1) {
+                        $current_score -= 25;
+                    }
+                }
+
+                // Simple randomization to spread lessons out more naturally
+                $current_score -= rand(1, 10);
+
+                if ($current_score > $best_score) {
+                    $best_score = $current_score;
+                    $best_slot = ['day' => $day, 'period' => $period];
+                }
             }
         }
     }
-    return null; // No slot found
+    return $best_slot;
 }
 
 
