@@ -122,7 +122,7 @@ function generate_timetable($data, $days_of_week) {
         $lesson_label = $lesson['display_name'] . (is_array($lesson['class_id']) ? ' for ' . count($lesson['class_id']) . ' classes' : ' for class ' . $lesson['class_id']);
         error_log("generate_timetable: Attempting to place lesson #" . ($index + 1) . ": " . $lesson_label);
         
-        $best_slot = find_best_slot_for_lesson($lesson, $class_timetables, $teacher_timetables, $days_of_week, $periods_per_day, $data['workloads']);
+        $best_slot = find_best_slot_for_lesson($lesson, $class_timetables, $teacher_timetables, $days_of_week, $periods_per_day, $data['workloads'], $data['timeslots']);
 
         if ($best_slot) {
             $lessons_placed++;
@@ -150,6 +150,15 @@ function generate_timetable($data, $days_of_week) {
                     $teacher_timetables[$teacher_id][$day][$period + 1] = true;
                 }
             } else { // Elective Group
+                // Mark all teachers in the group as busy for this slot
+                foreach ($lesson['teacher_ids'] as $teacher_id) {
+                    $teacher_timetables[$teacher_id][$day][$period] = true;
+                    if ($lesson['is_double']) {
+                        $teacher_timetables[$teacher_id][$day][$period + 1] = true;
+                    }
+                }
+
+                // Populate the class-specific data for display
                 foreach($lesson['component_lessons'] as $comp_lesson) {
                     $class_id = $comp_lesson['class_id'];
                     $teacher_id = $comp_lesson['teacher_id'];
@@ -165,10 +174,8 @@ function generate_timetable($data, $days_of_week) {
                     ];
 
                     $class_timetables[$class_id][$day][$period] = $lesson_data;
-                    $teacher_timetables[$teacher_id][$day][$period] = true;
                     if ($lesson['is_double']) {
                         $class_timetables[$class_id][$day][$period + 1] = $lesson_data;
-                        $teacher_timetables[$teacher_id][$day][$period + 1] = true;
                     }
                 }
             }
@@ -182,7 +189,7 @@ function generate_timetable($data, $days_of_week) {
     return $class_timetables;
 }
 
-function find_best_slot_for_lesson($lesson, &$class_timetables, &$teacher_timetables, $days_of_week, $periods_per_day, $workloads) {
+function find_best_slot_for_lesson($lesson, &$class_timetables, &$teacher_timetables, $days_of_week, $periods_per_day, $workloads, $all_timeslots) {
     $best_slot = null;
     $best_score = -1;
 
@@ -210,6 +217,25 @@ function find_best_slot_for_lesson($lesson, &$class_timetables, &$teacher_timeta
             // Basic availability check
             if ($is_double && $period + 1 >= $periods_per_day) continue;
 
+            // Prevent placing double lessons across breaks
+            if ($is_double) {
+                $non_break_periods = array_values(array_filter($all_timeslots, function($ts) { return !$ts['is_break']; }));
+                $first_period_timeslot = $non_break_periods[$period];
+                $second_period_timeslot = $non_break_periods[$period + 1];
+
+                $first_original_index = -1;
+                $second_original_index = -1;
+                $all_timeslots_values = array_values($all_timeslots);
+                foreach ($all_timeslots_values as $index => $ts) {
+                    if ($ts['id'] == $first_period_timeslot['id']) $first_original_index = $index;
+                    if ($ts['id'] == $second_period_timeslot['id']) $second_original_index = $index;
+                }
+
+                if ($first_original_index === -1 || $second_original_index === -1 || $second_original_index !== $first_original_index + 1) {
+                    continue; // This slot spans a break, so it's invalid for a double lesson.
+                }
+            }
+
             $slot_available = true;
             foreach ($class_ids as $cid) {
                 if (!isset($class_timetables[$cid]) || $class_timetables[$cid][$day][$period] !== null || ($is_double && $class_timetables[$cid][$day][$period + 1] !== null)) {
@@ -220,9 +246,9 @@ function find_best_slot_for_lesson($lesson, &$class_timetables, &$teacher_timeta
             if (!$slot_available) continue;
 
             foreach ($teacher_ids as $tid) {
-                if (!isset($teacher_timetables[$tid]) || $teacher_timetables[$tid][$day][$period] !== null || ($is_double && $teacher_timetables[$tid][$day][$period + 1] !== null)) {
+                if (!isset($teacher_timetables[$tid]) || $teacher_timetables[$tid][$day][$period] !== null || ($is_double && isset($teacher_timetables[$tid][$day][$period + 1]) && $teacher_timetables[$tid][$day][$period + 1] !== null)) {
                     $slot_available = false;
-                    break;
+                    break; 
                 }
             }
 
@@ -258,8 +284,25 @@ function find_best_slot_for_lesson($lesson, &$class_timetables, &$teacher_timeta
                     }
                 }
 
-                // Simple randomization to spread lessons out more naturally
-                $current_score -= rand(1, 10);
+                // Rule 2: Penalize days that are already "full" for the class
+                $lessons_on_day = 0;
+                foreach ($class_ids as $cid) {
+                    $lessons_on_day += count(array_filter($class_timetables[$cid][$day]));
+                }
+                // The penalty increases quadratically to strongly avoid busy days
+                $current_score -= $lessons_on_day * $lessons_on_day;
+
+                // Rule 3: Penalize consecutive lessons for a teacher (teacher fatigue)
+                foreach ($teacher_ids as $tid) {
+                    // Check period before
+                    if ($period > 0 && $teacher_timetables[$tid][$day][$period - 1] !== null) {
+                        $current_score -= 15;
+                    }
+                    // Check period after (don't check for double lessons as that's intended)
+                    if (!$is_double && $period < $periods_per_day - 1 && $teacher_timetables[$tid][$day][$period + 1] !== null) {
+                        $current_score -= 15;
+                    }
+                }
 
                 if ($current_score > $best_score) {
                     $best_score = $current_score;
@@ -411,9 +454,7 @@ function get_timetable_from_db($pdo, $classes, $timeslots) {
             'is_elective' => (bool)$lesson['is_elective'],
         ];
 
-        if (isset($class_timetables[$class_id][$day_idx][$period_idx])) {
-            $class_timetables[$class_id][$day_idx][$period_idx] = $lesson_data;
-        }
+        $class_timetables[$class_id][$day_idx][$period_idx] = $lesson_data;
         if ($lesson_data['is_double'] && isset($class_timetables[$class_id][$day_idx][$period_idx + 1])) {
             $class_timetables[$class_id][$day_idx][$period_idx + 1] = $lesson_data;
         }
@@ -520,7 +561,32 @@ $class_timetables = get_timetable_from_db($pdoconn, $classes, $timeslots);
                                                             continue; // This cell is covered by a rowspan from the lesson above.
                                                         }
                                                         
-                                                        $rowspan = ($lesson && !empty($lesson['is_double'])) ? 2 : 1;
+                                                        $rowspan = 1;
+                                                        if ($lesson && !empty($lesson['is_double'])) {
+                                                            // Check if the next timeslot is not a break to prevent rowspan over a break row
+                                                            $is_next_slot_a_break = false;
+                                                            $current_timeslot_index = -1;
+                                                            
+                                                            // Find the index of the current timeslot
+                                                            foreach (array_values($timeslots) as $index => $ts) {
+                                                                if ($ts['id'] === $timeslot['id']) {
+                                                                    $current_timeslot_index = $index;
+                                                                    break;
+                                                                }
+                                                            }
+                                                            
+                                                            // Check the next timeslot if the current one was found
+                                                            if ($current_timeslot_index !== -1 && isset(array_values($timeslots)[$current_timeslot_index + 1])) {
+                                                                $next_timeslot = array_values($timeslots)[$current_timeslot_index + 1];
+                                                                if ($next_timeslot['is_break']) {
+                                                                    $is_next_slot_a_break = true;
+                                                                }
+                                                            }
+                                                            
+                                                            if (!$is_next_slot_a_break) {
+                                                                $rowspan = 2;
+                                                            }
+                                                        }
                                                         ?>
                                                         <td class="timetable-slot align-middle" rowspan="<?php echo $rowspan; ?>">
                                                             <?php
