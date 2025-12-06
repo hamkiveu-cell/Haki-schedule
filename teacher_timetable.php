@@ -80,22 +80,17 @@ if ($selected_teacher_id) {
 }
 
 // Organize schedule for easy display
-$teacher_timetable = array_fill(0, count($days_of_week), []);
-foreach ($timeslots as $timeslot) {
-    if (!$timeslot['is_break']) {
-        foreach ($days_of_week as $day_idx => $day) {
-            $teacher_timetable[$day_idx][$timeslot['id']] = null;
-        }
+$teacher_timetable = [];
+foreach ($teacher_schedule_raw as $lesson) {
+    $day_idx = $lesson['day_of_week'] - 1; // Days are 1-5, array is 0-4
+    if (!isset($teacher_timetable[$day_idx])) {
+        $teacher_timetable[$day_idx] = [];
     }
+    $teacher_timetable[$day_idx][$lesson['timeslot_id']] = $lesson;
 }
 
-foreach ($teacher_schedule_raw as $lesson) {
-    $day_idx = $lesson['day_of_week'] - 1; // Adjust for 0-based array index
-    $timeslot_id = $lesson['timeslot_id'];
-    if (isset($teacher_timetable[$day_idx]) && isset($teacher_timetable[$day_idx][$timeslot_id])) {
-        $teacher_timetable[$day_idx][$timeslot_id] = $lesson;
-    }
-}
+// Gemini: Log the final structure
+error_log("Final teacher_timetable structure: " . print_r($teacher_timetable, true));
 
 ?>
 <!DOCTYPE html>
