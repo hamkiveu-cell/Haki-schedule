@@ -566,55 +566,50 @@ $class_timetables = get_timetable_from_db($pdoconn, $classes, $timeslots, $days_
                                                         $lesson = $class_timetables[$class['id']][$day_idx][$period_idx] ?? null;
 
                                                         // Logic to determine if cell should be skipped
-                                                        $skip_cell = false;
                                                         $lesson_above = ($period_idx > 0) ? ($class_timetables[$class['id']][$day_idx][$period_idx - 1] ?? null) : null;
                                                         if ($lesson_above && !empty($lesson_above['is_double']) && ($lesson_above['id'] ?? 'a') === ($lesson['id'] ?? 'b')) {
-                                                            $skip_cell = true;
+                                                            continue; // This is the fix: skip the cell entirely
                                                         }
 
-                                                        if (!$skip_cell) :
-                                                            $rowspan = 1;
-                                                            if ($lesson && !empty($lesson['is_double'])) {
-                                                                // Check if the next timeslot is not a break to prevent rowspan over a break row
-                                                                $is_next_slot_a_break = false;
-                                                                $current_timeslot_index = -1;
-                                                                
-                                                                // Find the index of the current timeslot
-                                                                $timeslots_values = array_values($timeslots);
-                                                                foreach ($timeslots_values as $index => $ts) {
-                                                                    if ($ts['id'] === $timeslot['id']) {
-                                                                        $current_timeslot_index = $index;
-                                                                        break;
-                                                                    }
-                                                                }
-                                                                
-                                                                // Check the next timeslot if the current one was found
-                                                                if ($current_timeslot_index !== -1 && isset($timeslots_values[$current_timeslot_index + 1])) {
-                                                                    $next_timeslot = $timeslots_values[$current_timeslot_index + 1];
-                                                                    if ($next_timeslot['is_break']) {
-                                                                        $is_next_slot_a_break = true;
-                                                                    }
-                                                                }
-                                                                
-                                                                if (!$is_next_slot_a_break) {
-                                                                    $rowspan = 2;
+                                                        $rowspan = 1;
+                                                        if ($lesson && !empty($lesson['is_double'])) {
+                                                            // Check if the next timeslot is not a break to prevent rowspan over a break row
+                                                            $is_next_slot_a_break = false;
+                                                            $current_timeslot_index = -1;
+                                                            
+                                                            $timeslots_values = array_values($timeslots);
+                                                            foreach ($timeslots_values as $index => $ts) {
+                                                                if ($ts['id'] === $timeslot['id']) {
+                                                                    $current_timeslot_index = $index;
+                                                                    break;
                                                                 }
                                                             }
+                                                            
+                                                            if ($current_timeslot_index !== -1 && isset($timeslots_values[$current_timeslot_index + 1])) {
+                                                                $next_timeslot = $timeslots_values[$current_timeslot_index + 1];
+                                                                if ($next_timeslot['is_break']) {
+                                                                    $is_next_slot_a_break = true;
+                                                                }
+                                                            }
+                                                            
+                                                            if (!$is_next_slot_a_break) {
+                                                                $rowspan = 2;
+                                                            }
+                                                        }
+                                                        ?>
+                                                        <td class="timetable-slot align-middle" rowspan="<?php echo $rowspan; ?>">
+                                                            <?php
+                                                            if ($lesson) :
+                                                                $css_class = 'lesson p-1 h-100 d-flex flex-column justify-content-center';
+                                                                if (!empty($lesson['is_elective'])) $css_class .= ' is-elective';
+                                                                if (!empty($lesson['is_double'])) $css_class .= ' is-double';
                                                             ?>
-                                                            <td class="timetable-slot align-middle" rowspan="<?php echo $rowspan; ?>">
-                                                                <?php
-                                                                if ($lesson) :
-                                                                    $css_class = 'lesson p-1 h-100 d-flex flex-column justify-content-center';
-                                                                    if (!empty($lesson['is_elective'])) $css_class .= ' is-elective';
-                                                                    if (!empty($lesson['is_double'])) $css_class .= ' is-double';
-                                                                ?>
-                                                                    <div class="<?php echo $css_class; ?>" data-lesson-id="<?php echo $lesson['id'] ?? ''; ?>">
-                                                                        <strong><?php echo htmlspecialchars($lesson['subject_name']); ?></strong><br>
-                                                                        <small><?php echo htmlspecialchars($lesson['teacher_name']); ?></small>
-                                                                    </div>
-                                                                <?php endif; ?>
-                                                            </td>
-                                                        <?php endif; // if !skip_cell ?>
+                                                                <div class="<?php echo $css_class; ?>" data-lesson-id="<?php echo $lesson['id'] ?? ''; ?>">
+                                                                    <strong><?php echo htmlspecialchars($lesson['subject_name']); ?></strong><br>
+                                                                    <small><?php echo htmlspecialchars($lesson['teacher_name']); ?></small>
+                                                                </div>
+                                                            <?php endif; ?>
+                                                        </td>
                                                     <?php endfor; // day_idx ?>
                                                     <?php $period_idx++; ?>
                                                 <?php endif; // is_break ?>
