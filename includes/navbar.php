@@ -31,6 +31,11 @@ $role = $_SESSION['role'] ?? '';
                         </li>
                         <li class="nav-item"><a class="nav-link <?php echo ($current_page == 'timetable.php') ? 'active' : ''; ?>" href="/timetable.php">Class Timetable</a></li>
                     <?php endif; ?>
+
+                    <?php if ($role === 'teacher' && !empty($_SESSION['can_edit_workload'])): ?>
+                        <li class="nav-item"><a class="nav-link <?php echo ($current_page == 'teacher_workload.php') ? 'active' : ''; ?>" href="/teacher_workload.php">My Workload</a></li>
+                    <?php endif; ?>
+
                     <li class="nav-item"><a class="nav-link <?php echo ($current_page == 'teacher_timetable.php') ? 'active' : ''; ?>" href="/teacher_timetable.php">Teacher Timetable</a></li>
                     <li class="nav-item"><a class="nav-link" href="/logout.php">Logout</a></li>
                 <?php else : ?>

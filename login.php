@@ -30,6 +30,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_SESSION['username'] = $user['username'];
                 $_SESSION['role'] = $user['role'];
                 $_SESSION['school_id'] = $user['school_id'];
+
+                // If the user is a teacher, fetch their workload editing permission
+                if ($user['role'] === 'teacher') {
+                    $stmt = $pdo->prepare("SELECT can_edit_workload FROM teachers WHERE user_id = ?");
+                    $stmt->execute([$user['id']]);
+                    $teacher_permission = $stmt->fetchColumn();
+                    $_SESSION['can_edit_workload'] = (bool)$teacher_permission;
+                }
                 
                 // Redirect to the main page
                 header("Location: dashboard.php");

@@ -3,19 +3,8 @@ require_once __DIR__ . '/db/config.php';
 
 $message = '';
 $error = '';
-$registration_open = false;
 
-try {
-    $pdo = db();
-    $stmt = $pdo->query("SELECT COUNT(*) FROM schools");
-    if ($stmt->fetchColumn() == 0) {
-        $registration_open = true;
-    }
-} catch (PDOException $e) {
-    $error = 'Database error: ' . $e->getMessage();
-}
-
-if ($registration_open && $_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $username = $_POST['username'] ?? null;
     $password = $_POST['password'] ?? null;
     $school_name = $_POST['school_name'] ?? null;
@@ -25,6 +14,7 @@ if ($registration_open && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = 'All fields are required.';
     } else {
         try {
+            $pdo = db();
             $pdo->beginTransaction();
 
             // Check if school name already exists
@@ -35,7 +25,7 @@ if ($registration_open && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->rollBack();
             } else {
                 // Insert new school
-                $stmt = $pdo->prepare("INSERT INTO schools (name) VALUES (?)");
+                $stmt = $pdo->prepare("INSERT INTO schools (name) VALUES (?)" );
                 $stmt->execute([$school_name]);
                 $school_id = $pdo->lastInsertId();
 
@@ -99,7 +89,7 @@ if ($registration_open && $_SERVER['REQUEST_METHOD'] === 'POST') {
                             <div class="alert alert-danger"><?php echo $error; ?></div>
                         <?php endif; ?>
 
-                        <?php if (!$message && $registration_open): ?>
+                        <?php if (!$message): ?>
                         <form action="register.php" method="POST">
                             <div class="mb-3">
                                 <label for="school_name" class="form-label">School Name</label>
@@ -123,11 +113,6 @@ if ($registration_open && $_SERVER['REQUEST_METHOD'] === 'POST') {
                         </form>
                         <div class="text-center mt-3">
                             <p>Already have an account? <a href="login.php">Login here</a>.</p>
-                        </div>
-                        <?php elseif (!$message): ?>
-                        <div class="alert alert-info">
-                            Registration is currently closed. Only one school can be registered.
-                            <p class="mt-3"><a href="login.php" class="btn btn-primary">Go to Login</a></p>
                         </div>
                         <?php endif; ?>
                     </div>

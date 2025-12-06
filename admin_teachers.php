@@ -9,6 +9,20 @@ $school_id = $_SESSION['school_id'];
 
 $pdo = db();
 
+// Handle permission toggle
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['toggle_permission_id'])) {
+    try {
+        $teacher_id = $_POST['toggle_permission_id'];
+        $new_status = $_POST['new_status'];
+        $stmt = $pdo->prepare("UPDATE teachers SET can_edit_workload = ? WHERE id = ? AND school_id = ?");
+        $stmt->execute([$new_status, $teacher_id, $school_id]);
+        $message = "Permission updated successfully.";
+    } catch (PDOException $e) {
+        $error = "Error updating permission: " . $e->getMessage();
+    }
+}
+
+
 // Handle Delete request
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_id'])) {
     try {
@@ -187,7 +201,7 @@ try {
 
     <main class="container py-5">
         <div class="row justify-content-center">
-            <div class="col-lg-8">
+            <div class="col-lg-10">
                 <h1 class="h2 fw-bold mb-4">Manage Teachers</h1>
 
                 <?php if ($message): ?>
@@ -213,7 +227,7 @@ try {
                             </div>
                             <div class="mb-3">
                                 <label for="password" class="form-label">Password</label>
-                                <input type="password" class="form-control" id="password" name="password" <?php echo $editing_teacher ? '' : 'required'; ?>>
+                                <input type="password" class="form-.form-control" id="password" name="password" <?php echo $editing_teacher ? '' : 'required'; ?>>
                                 <?php if ($editing_teacher): ?>
                                     <small class="form-text text-muted">Leave blank to keep the current password.</small>
                                 <?php endif; ?>
@@ -239,6 +253,7 @@ try {
                                         <tr>
                                             <th>Name</th>
                                             <th>Email</th>
+                                            <th>Workload Editing</th>
                                             <th>Actions</th>
                                         </tr>
                                     </thead>
@@ -248,10 +263,29 @@ try {
                                                 <td><?php echo htmlspecialchars($teacher['name']); ?></td>
                                                 <td><?php echo htmlspecialchars($teacher['email']); ?></td>
                                                 <td>
-                                                    <a href="?edit_id=<?php echo $teacher['id']; ?>" class="btn btn-sm btn-outline-primary">Edit</a>
+                                                    <?php if ($teacher['can_edit_workload']): ?>
+                                                        <span class="badge bg-success">Allowed</span>
+                                                    <?php else: ?>
+                                                        <span class="badge bg-secondary">Not Allowed</span>
+                                                    <?php endif; ?>
+                                                </td>
+                                                <td>
+                                                    <a href="?edit_id=<?php echo $teacher['id']; ?>" class="btn btn-sm btn-outline-primary mb-1">Edit</a>
+                                                    
+                                                    <form action="admin_teachers.php" method="POST" class="d-inline">
+                                                        <input type="hidden" name="toggle_permission_id" value="<?php echo $teacher['id']; ?>">
+                                                        <?php if ($teacher['can_edit_workload']): ?>
+                                                            <input type="hidden" name="new_status" value="0">
+                                                            <button type="submit" class="btn btn-sm btn-warning mb-1">Revoke</button>
+                                                        <?php else: ?>
+                                                            <input type="hidden" name="new_status" value="1">
+                                                            <button type="submit" class="btn btn-sm btn-success mb-1">Allow</button>
+                                                        <?php endif; ?>
+                                                    </form>
+
                                                     <form action="admin_teachers.php" method="POST" class="d-inline" onsubmit="return confirm('Are you sure you want to delete this teacher?');">
                                                         <input type="hidden" name="delete_id" value="<?php echo $teacher['id']; ?>">
-                                                        <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                                                        <button type="submit" class="btn btn-sm btn-outline-danger mb-1">Delete</button>
                                                     </form>
                                                 </td>
                                             </tr>
