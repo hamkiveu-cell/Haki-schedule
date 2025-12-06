@@ -455,11 +455,21 @@ $class_timetables = get_timetable_from_db($pdoconn, $classes, $timeslots);
                                                     <td colspan="<?php echo count($days_of_week); ?>" class="text-center table-secondary"><strong>Break</strong></td>
                                                 <?php else : ?>
                                                     <?php for ($day_idx = 0; $day_idx < count($days_of_week); $day_idx++) : ?>
-                                                        <td class="timetable-slot">
+                                                        <?php
+                                                        $lesson = $class_timetables[$class['id']][$day_idx][$period_idx] ?? null;
+                                                        
+                                                        // Logic to skip rendering the cell if it's the second part of a double lesson
+                                                        $lesson_above = ($period_idx > 0) ? ($class_timetables[$class['id']][$day_idx][$period_idx - 1] ?? null) : null;
+                                                        if ($lesson_above && !empty($lesson_above['is_double']) && ($lesson_above['id'] ?? 'a') === ($lesson['id'] ?? 'b')) {
+                                                            continue; // This cell is covered by a rowspan from the lesson above.
+                                                        }
+                                                        
+                                                        $rowspan = ($lesson && !empty($lesson['is_double'])) ? 2 : 1;
+                                                        ?>
+                                                        <td class="timetable-slot align-middle" rowspan="<?php echo $rowspan; ?>">
                                                             <?php
-                                                            $lesson = $class_timetables[$class['id']][$day_idx][$period_idx] ?? null;
                                                             if ($lesson) :
-                                                                $css_class = 'lesson p-1';
+                                                                $css_class = 'lesson p-1 h-100 d-flex flex-column justify-content-center';
                                                                 if (!empty($lesson['is_elective'])) $css_class .= ' is-elective';
                                                                 if (!empty($lesson['is_double'])) $css_class .= ' is-double';
                                                             ?>
