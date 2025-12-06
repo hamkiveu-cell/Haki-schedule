@@ -389,6 +389,11 @@ function get_timetable_from_db($pdo, $classes, $timeslots) {
         $day_idx = $lesson['day_of_week'];
         $timeslot_id = $lesson['timeslot_id'];
 
+        if ($day_idx >= count($days_of_week)) {
+            error_log("Invalid day_idx {$day_idx} found for lesson ID {$lesson['id']}. Skipping.");
+            continue;
+        }
+
         if (!isset($timeslot_id_to_period_idx[$timeslot_id])) {
             continue;
         }
@@ -406,7 +411,9 @@ function get_timetable_from_db($pdo, $classes, $timeslots) {
             'is_elective' => (bool)$lesson['is_elective'],
         ];
 
-        $class_timetables[$class_id][$day_idx][$period_idx] = $lesson_data;
+        if (isset($class_timetables[$class_id][$day_idx][$period_idx])) {
+            $class_timetables[$class_id][$day_idx][$period_idx] = $lesson_data;
+        }
         if ($lesson_data['is_double'] && isset($class_timetables[$class_id][$day_idx][$period_idx + 1])) {
             $class_timetables[$class_id][$day_idx][$period_idx + 1] = $lesson_data;
         }
@@ -464,9 +471,11 @@ $class_timetables = get_timetable_from_db($pdoconn, $classes, $timeslots);
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h1>Class Timetable</h1>
             <div class="d-flex gap-2">
+                <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin') : ?>
                 <form method="POST" action="">
                     <button type="submit" name="generate" class="btn btn-primary" <?php echo empty($workloads) ? 'disabled' : ''; ?>>Generate Timetable</button>
                 </form>
+                <?php endif; ?>
                 <button id="print-btn" class="btn btn-secondary">Print</button>
             </div>
         </div>
