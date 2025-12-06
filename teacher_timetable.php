@@ -14,23 +14,29 @@ function get_timeslots($pdo) {
     return $pdo->query("SELECT * FROM timeslots ORDER BY start_time")->fetchAll(PDO::FETCH_ASSOC);
 }
 
-function get_teacher_schedule($pdo, $teacher_id, $school_id) {
-    $stmt = $pdo->prepare("
-        SELECT 
-            s.id,
-            s.day_of_week,
-            s.timeslot_id,
-            s.lesson_display_name,
-            c.name as class_name,
-            s.is_double,
-            s.is_elective,
-            s.is_horizontal_elective
-        FROM schedules s
-        JOIN classes c ON s.class_id = c.id
-        JOIN schedule_teachers st ON s.id = st.schedule_id
-        WHERE st.teacher_id = :teacher_id AND c.school_id = :school_id
-    ");
-    $stmt->execute([':teacher_id' => $teacher_id, ':school_id' => $school_id]);
+function get_teacher_schedule($pdo, $teacher_id) {
+    $sql = "
+    SELECT
+        s.id,
+        s.day_of_week,
+        s.timeslot_id,
+        s.lesson_display_name,
+        c.name as class_name,
+        sub.name as subject_name, -- The specific subject for the teacher
+        s.is_double,
+        s.is_elective
+    FROM schedules s
+    JOIN schedule_teachers st ON s.id = st.schedule_id
+    LEFT JOIN classes c ON s.class_id = c.id
+    -- Find the specific subject this teacher teaches to this class from workloads
+    LEFT JOIN workloads w ON st.teacher_id = w.teacher_id AND s.class_id = w.class_id
+    LEFT JOIN subjects sub ON w.subject_id = sub.id
+    WHERE st.teacher_id = :teacher_id
+    ORDER BY s.day_of_week, s.timeslot_id
+    ";
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([':teacher_id' => $teacher_id]);
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
@@ -72,7 +78,7 @@ if ($selected_teacher_id) {
             break;
         }
     }
-    $teacher_schedule_raw = get_teacher_schedule($pdoconn, $selected_teacher_id, $school_id);
+    $teacher_schedule_raw = get_teacher_schedule($pdoconn, $selected_teacher_id);
     
     // Gemini: Log the data for debugging
     error_log("--- Teacher Timetable Debug ---");
@@ -254,8 +260,13 @@ error_log("Final teacher_timetable_by_period structure: " . print_r($teacher_tim
                                                     $lessons_to_display = is_array($lesson) && !isset($lesson['id']) ? $lesson : [$lesson];
                                                     foreach ($lessons_to_display as $single_lesson) {
                                                         if ($single_lesson) { // Check not null
+                                                            $display_name = $single_lesson['lesson_display_name'];
+                                                            // For electives, the teacher should see their specific subject.
+                                                            if (!empty($single_lesson['is_elective']) && !empty($single_lesson['subject_name'])) {
+                                                                $display_name = $single_lesson['subject_name'];
+                                                            }
                                                             echo '<div class="lesson p-1 mb-1">';
-                                                            echo '<strong>' . htmlspecialchars($single_lesson['lesson_display_name']) . '</strong><br>';
+                                                            echo '<strong>' . htmlspecialchars($display_name) . '</strong><br>';
                                                             echo '<small>' . htmlspecialchars($single_lesson['class_name']) . '</small>';
                                                             echo '</div>';
                                                         }

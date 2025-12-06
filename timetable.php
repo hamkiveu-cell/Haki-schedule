@@ -173,7 +173,7 @@ function generate_timetable($data, $days_of_week) {
                         'subject_name' => $comp_lesson['subject_name'],
                         'teacher_name' => $comp_lesson['teacher_name'],
                         'subject_id' => $comp_lesson['subject_id'],
-                        'teacher_ids' => [$teacher_id], // Specific teacher for this part
+                        'teacher_ids' => $lesson['teacher_ids'], // All teachers in the elective group
                         'is_double' => $lesson['is_double'],
                         'is_elective' => true,
                         'group_name' => $lesson['display_name']
@@ -642,8 +642,21 @@ $class_timetables = get_timetable_from_db($pdoconn, $classes, $timeslots, $days_
                                                                     if (!empty($lesson['is_double'])) $css_class .= ' is-double';
                                                                 ?>
                                                                     <div class="<?php echo $css_class; ?>" data-lesson-id="<?php echo $lesson['id'] ?? ''; ?>">
-                                                                        <strong><?php echo htmlspecialchars($lesson['subject_name']); ?></strong><br>
-                                                                        <small><?php echo htmlspecialchars($lesson['teacher_name']); ?></small>
+                                                                        <?php
+                                                                        $display_subject = $lesson['subject_name'];
+                                                                        $display_teacher = $lesson['teacher_name'];
+
+                                                                        if (!empty($lesson['is_elective'])) {
+                                                                            // For electives, subject_name can be "Group / Subject". We want to show only the group name.
+                                                                            $parts = explode(' / ', $lesson['subject_name'], 2);
+                                                                            $display_subject = $parts[0]; // The group name
+                                                                            $display_teacher = ''; // Don't show any specific teacher in the class view
+                                                                        }
+                                                                        ?>
+                                                                        <strong><?php echo htmlspecialchars($display_subject); ?></strong><br>
+                                                                        <?php if (!empty($display_teacher)) : ?>
+                                                                            <small><?php echo htmlspecialchars($display_teacher); ?></small>
+                                                                        <?php endif; ?>
                                                                     </div>
                                                                 <?php endif; ?>
                                                             </td>
