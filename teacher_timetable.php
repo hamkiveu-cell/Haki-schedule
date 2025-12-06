@@ -17,7 +17,7 @@ function get_timeslots($pdo) {
 function get_teacher_schedule($pdo, $teacher_id, $school_id) {
     $stmt = $pdo->prepare("
         SELECT 
-            s.id, // Gemini: Added for double lesson check
+            s.id,
             s.day_of_week,
             s.timeslot_id,
             s.lesson_display_name,
@@ -93,36 +93,6 @@ foreach ($teacher_schedule_raw as $lesson) {
     if (isset($timeslot_id_to_period_idx[$lesson['timeslot_id']])) {
         $period_idx = $timeslot_id_to_period_idx[$lesson['timeslot_id']];
         $teacher_timetable_by_period[$day_idx][$period_idx] = $lesson;
-
-        // If it's a double lesson, we need to fill the next period as well
-        if ($lesson['is_double']) {
-            if (isset($teacher_timetable_by_period[$day_idx][$period_idx + 1])) {
-                // This should not happen with valid data, but as a safeguard
-                continue;
-            }
-            // Find the next timeslot that is not a break
-            $current_timeslot_index = -1;
-            $timeslots_values = array_values($timeslots);
-            foreach ($timeslots_values as $index => $ts) {
-                if ($ts['id'] === $lesson['timeslot_id']) {
-                    $current_timeslot_index = $index;
-                    break;
-                }
-            }
-
-            if ($current_timeslot_index !== -1 && isset($timeslots_values[$current_timeslot_index + 1])) {
-                $next_timeslot = $timeslots_values[$current_timeslot_index + 1];
-                if (!$next_timeslot['is_break']) {
-                    if(isset($timeslot_id_to_period_idx[$next_timeslot['id']])) {
-                        $next_period_idx = $timeslot_id_to_period_idx[$next_timeslot['id']];
-                        // Ensure the next period is consecutive
-                        if ($next_period_idx === $period_idx + 1) {
-                            $teacher_timetable_by_period[$day_idx][$next_period_idx] = $lesson;
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -209,6 +179,7 @@ error_log("Final teacher_timetable_by_period structure: " . print_r($teacher_tim
                             </thead>
                             <tbody>
                                 <?php
+                                $skipped_slots = []; // [day_idx][period_idx] => true
                                 $period_idx = 0;
                                 foreach ($timeslots as $timeslot): ?>
                                     <tr>
@@ -221,37 +192,23 @@ error_log("Final teacher_timetable_by_period structure: " . print_r($teacher_tim
                                         <?php else: ?>
                                             <?php foreach ($days_of_week as $day_idx => $day): ?>
                                                 <?php
-                                                $lesson = $teacher_timetable_by_period[$day_idx][$period_idx] ?? null;
-
-                                                // Logic to skip rendering the cell if it's the second part of a double lesson
-                                                $skip_cell = false;
-                                                $lesson_above = ($period_idx > 0) ? ($teacher_timetable_by_period[$day_idx][$period_idx - 1] ?? null) : null;
-                                                if ($lesson_above && !empty($lesson_above['is_double']) && ($lesson_above['id'] ?? 'a') === ($lesson['id'] ?? 'b')) {
-                                                    $skip_cell = true;
+                                                if (isset($skipped_slots[$day_idx][$period_idx])) {
+                                                    continue;
                                                 }
+                                                
+                                                $lesson = $teacher_timetable_by_period[$day_idx][$period_idx] ?? null;
+                                                $rowspan = 1;
 
-                                                if (!$skip_cell): 
-                                                    $rowspan = 1;
-                                                    if ($lesson && !empty($lesson['is_double'])) {
-                                                        $is_next_slot_a_break = false;
-                                                        $current_timeslot_index = -1;
-                                                        $timeslots_values = array_values($timeslots);
-                                                        foreach ($timeslots_values as $index => $ts) {
-                                                            if ($ts['id'] === $timeslot['id']) {
-                                                                $current_timeslot_index = $index;
-                                                                break;
-                                                            }
-                                                        }
-                                                        if ($current_timeslot_index !== -1 && isset($timeslots_values[$current_timeslot_index + 1])) {
-                                                            $next_timeslot = $timeslots_values[$current_timeslot_index + 1];
-                                                            if ($next_timeslot['is_break']) {
-                                                                $is_next_slot_a_break = true;
-                                                            }
-                                                        }
-                                                        if (!$is_next_slot_a_break) {
-                                                            $rowspan = 2;
-                                                        }
+                                                if ($lesson && !empty($lesson['is_double'])) {
+                                                    // Check if the next period is available for the double lesson
+                                                    $next_period_idx = $period_idx + 1;
+                                                    $next_lesson = $teacher_timetable_by_period[$day_idx][$next_period_idx] ?? null;
+                                                    
+                                                    if ($next_lesson && $next_lesson['id'] === $lesson['id']) {
+                                                        $rowspan = 2;
+                                                        $skipped_slots[$day_idx][$next_period_idx] = true;
                                                     }
+                                                }
                                                 ?>
                                                 <td class="timetable-slot align-middle" rowspan="<?php echo $rowspan; ?>">
                                                     <?php 
@@ -259,6 +216,7 @@ error_log("Final teacher_timetable_by_period structure: " . print_r($teacher_tim
                                                         $class_str = '';
                                                         if ($lesson['is_horizontal_elective']) $class_str = 'bg-light-purple';
                                                         elseif ($lesson['is_elective']) $class_str = 'bg-light-green';
+                                                        // Use a different color for double lessons to distinguish them
                                                         elseif ($lesson['is_double']) $class_str = 'bg-light-blue';
                                                     ?>
                                                         <div class="lesson p-1 <?php echo $class_str; ?>">
@@ -267,7 +225,6 @@ error_log("Final teacher_timetable_by_period structure: " . print_r($teacher_tim
                                                         </div>
                                                     <?php endif; ?>
                                                 </td>
-                                                <?php endif; // if !skip_cell ?>
                                             <?php endforeach; // days_of_week ?>
                                             <?php $period_idx++; ?>
                                         <?php endif; // is_break ?>
