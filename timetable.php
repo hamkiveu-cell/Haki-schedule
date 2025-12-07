@@ -464,13 +464,7 @@ function get_timetable_from_db($pdo, $classes, $timeslots, $days_of_week) {
 
         $class_timetables[$class_id][$day_idx][$period_idx] = $lesson_data;
         if ($lesson_data['is_double'] && isset($class_timetables[$class_id][$day_idx][$period_idx + 1])) {
-            // For the second part of a double lesson, create a new array
-            // that is marked as a continuation, but does NOT have is_double = true.
-            // This prevents the rendering logic from trying to start a new rowspan.
-            $continuation_data = $lesson_data;
-            $continuation_data['is_double'] = false;
-            $continuation_data['is_continuation'] = true;
-            $class_timetables[$class_id][$day_idx][$period_idx + 1] = $continuation_data;
+            $class_timetables[$class_id][$day_idx][$period_idx + 1] = $lesson_data;
         }
     }
     
