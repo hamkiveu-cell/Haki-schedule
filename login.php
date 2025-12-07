@@ -25,23 +25,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if ($user && password_verify($password, $user['password'])) {
-                // Password is correct, start session
-                $_SESSION['user_id'] = $user['id'];
-                $_SESSION['username'] = $user['username'];
-                $_SESSION['role'] = $user['role'];
-                $_SESSION['school_id'] = $user['school_id'];
+                // Check if account is active
+                if ($user['is_active']) {
+                    // Password is correct, start session
+                    $_SESSION['user_id'] = $user['id'];
+                    $_SESSION['username'] = $user['username'];
+                    $_SESSION['role'] = $user['role'];
+                    $_SESSION['school_id'] = $user['school_id'];
 
-                // If the user is a teacher, fetch their workload editing permission
-                if ($user['role'] === 'teacher') {
-                    $stmt = $pdo->prepare("SELECT can_edit_workload FROM teachers WHERE user_id = ?");
-                    $stmt->execute([$user['id']]);
-                    $teacher_permission = $stmt->fetchColumn();
-                    $_SESSION['can_edit_workload'] = (bool)$teacher_permission;
+                    // If the user is a teacher, fetch their workload editing permission
+                    if ($user['role'] === 'teacher') {
+                        $stmt = $pdo->prepare("SELECT can_edit_workload FROM teachers WHERE user_id = ?");
+                        $stmt->execute([$user['id']]);
+                        $teacher_permission = $stmt->fetchColumn();
+                        $_SESSION['can_edit_workload'] = (bool)$teacher_permission;
+                    }
+                    
+                    // Redirect to the main page
+                    header("Location: dashboard.php");
+                    exit;
+                } else {
+                    // Account is not active, redirect to subscription page
+                    $_SESSION['user_id_for_activation'] = $user['id'];
+                    header("Location: subscription.php");
+                    exit;
                 }
-                
-                // Redirect to the main page
-                header("Location: dashboard.php");
-                exit;
             } else {
                 $error = 'Invalid username or password.';
             }
@@ -74,6 +82,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <div class="card-body p-4">
                         <h1 class="h3 fw-bold text-center mb-4">Login</h1>
                         
+                        <?php if (isset($_GET['status']) && $_GET['status'] === 'activated'): ?>
+                            <div class="alert alert-success">Your account has been activated! Please log in to continue.</div>
+                        <?php endif; ?>
+
                         <?php if ($error): ?>
                             <div class="alert alert-danger"><?php echo $error; ?></div>
                         <?php endif; ?>

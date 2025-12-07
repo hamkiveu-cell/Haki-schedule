@@ -43,7 +43,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $stmt = $pdo->prepare("INSERT INTO users (username, password, email, school_id, role) VALUES (?, ?, ?, ?, 'admin')");
                     if ($stmt->execute([$username, $hashed_password, $email, $school_id])) {
                         $pdo->commit();
-                        $message = 'Registration successful! You can now <a href="login.php">login</a>.';
+                        
+                        // Start session and store user ID for activation
+                        session_start();
+                        $_SESSION['user_id_for_activation'] = $pdo->lastInsertId();
+
+                        // Redirect to subscription page
+                        header("Location: subscription.php");
+                        exit;
                     } else {
                         $error = 'Failed to register user.';
                         $pdo->rollBack();
