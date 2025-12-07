@@ -103,26 +103,24 @@ foreach ($teacher_schedule_raw as $lesson) {
     $day_idx = $lesson['day_of_week'];
     if (isset($timeslot_id_to_period_idx[$lesson['timeslot_id']])) {
         $period_idx = $timeslot_id_to_period_idx[$lesson['timeslot_id']];
-        
-        if (isset($teacher_timetable_by_period[$day_idx][$period_idx])) {
-            // This slot is already filled, potentially by a multi-class elective.
-            // Create an array if it's not already one.
-            if (!is_array($teacher_timetable_by_period[$day_idx][$period_idx])) {
-                $teacher_timetable_by_period[$day_idx][$period_idx] = [$teacher_timetable_by_period[$day_idx][$period_idx]];
-            }
-            $teacher_timetable_by_period[$day_idx][$period_idx][] = $lesson;
-        } else {
-            $teacher_timetable_by_period[$day_idx][$period_idx] = $lesson;
+
+        // Skip if this slot is already filled by a continuation marker
+        if (isset($teacher_timetable_by_period[$day_idx][$period_idx]) && isset($teacher_timetable_by_period[$day_idx][$period_idx]['continuation'])) {
+            continue;
         }
 
-        if (!empty($lesson['is_double']) && isset($teacher_timetable_by_period[$day_idx][$period_idx + 1])) {
-            if (isset($teacher_timetable_by_period[$day_idx][$period_idx + 1])) {
-                 if (!is_array($teacher_timetable_by_period[$day_idx][$period_idx + 1])) {
-                    $teacher_timetable_by_period[$day_idx][$period_idx + 1] = [$teacher_timetable_by_period[$day_idx][$period_idx + 1]];
-                }
-                $teacher_timetable_by_period[$day_idx][$period_idx + 1][] = $lesson;
-            } else {
-                 $teacher_timetable_by_period[$day_idx][$period_idx + 1] = $lesson;
+        // Place the lesson. Handle co-teaching by making it an array.
+        if (!isset($teacher_timetable_by_period[$day_idx][$period_idx]) || $teacher_timetable_by_period[$day_idx][$period_idx] === null) {
+            $teacher_timetable_by_period[$day_idx][$period_idx] = [$lesson];
+        } else {
+            $teacher_timetable_by_period[$day_idx][$period_idx][] = $lesson;
+        }
+
+        if (!empty($lesson['is_double'])) {
+            $next_period_idx = $period_idx + 1;
+            if (isset($non_break_periods[$next_period_idx])) {
+                $continuation_marker = ['continuation' => true, 'original_lesson' => $lesson];
+                $teacher_timetable_by_period[$day_idx][$next_period_idx] = $continuation_marker;
             }
         }
     }
@@ -234,28 +232,45 @@ error_log("Final teacher_timetable_by_period structure: " . print_r($teacher_tim
                                             <small class="text-muted"><?php echo date("g:i A", strtotime($timeslot_info['start_time'])); ?> - <?php echo date("g:i A", strtotime($timeslot_info['end_time'])); ?></small>
                                         </td>
                                         <?php foreach ($days_of_week as $day_idx => $day): ?>
-                                            <td class="timetable-slot align-middle">
-                                                <?php
-                                                $lesson = $teacher_timetable_by_period[$day_idx][$period_idx] ?? null;
-                                                if ($lesson) {
-                                                    // If it's an array of lessons (co-teaching), display them all
-                                                    $lessons_to_display = is_array($lesson) && !isset($lesson['id']) ? $lesson : [$lesson];
-                                                    foreach ($lessons_to_display as $single_lesson) {
-                                                        if ($single_lesson) { // Check not null
-                                                            $display_name = $single_lesson['lesson_display_name'];
-                                                            // For electives, the teacher should see their specific subject.
-                                                            if (!empty($single_lesson['is_elective']) && !empty($single_lesson['subject_name'])) {
-                                                                $display_name = $single_lesson['subject_name'];
+                                            <?php
+                                                $lessons = $teacher_timetable_by_period[$day_idx][$period_idx] ?? null;
+
+                                                if (isset($lessons['continuation'])) {
+                                                    // This is a continuation of a double lesson, so we skip rendering the cell.
+                                                } else {
+                                                    $rowspan = 1;
+                                                    // Check if any lesson in this slot is a double lesson
+                                                    if (is_array($lessons)) {
+                                                        foreach ($lessons as $l) {
+                                                            if (!empty($l['is_double'])) {
+                                                                $rowspan = 2;
+                                                                break;
                                                             }
-                                                            echo '<div class="lesson p-1 mb-1">';
-                                                            echo '<strong>' . htmlspecialchars($display_name) . '</strong><br>';
-                                                            echo '<small>' . htmlspecialchars($single_lesson['class_name']) . '</small>';
-                                                            echo '</div>';
                                                         }
                                                     }
+                                                ?>
+                                                    <td class="timetable-slot align-middle" rowspan="<?php echo $rowspan; ?>">
+                                                        <?php
+                                                        if (is_array($lessons)) {
+                                                            foreach ($lessons as $single_lesson) {
+                                                                if ($single_lesson) { // Check not null
+                                                                    $display_name = $single_lesson['lesson_display_name'];
+                                                                    // For electives, the teacher should see their specific subject.
+                                                                    if (!empty($single_lesson['is_elective']) && !empty($single_lesson['subject_name'])) {
+                                                                        $display_name = $single_lesson['subject_name'];
+                                                                    }
+                                                                    echo '<div class="lesson p-1 mb-1">';
+                                                                    echo '<strong>' . htmlspecialchars($display_name) . '</strong><br>';
+                                                                    echo '<small>' . htmlspecialchars($single_lesson['class_name']) . '</small>';
+                                                                    echo '</div>';
+                                                                }
+                                                            }
+                                                        }
+                                                        ?>
+                                                    </td>
+                                                <?php
                                                 }
                                                 ?>
-                                            </td>
                                         <?php endforeach; ?>
                                     </tr>
                                 <?php
