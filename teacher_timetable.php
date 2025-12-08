@@ -16,21 +16,20 @@ function get_timeslots($pdo) {
 
 function get_teacher_schedule($pdo, $teacher_id) {
     $sql = "
+    -- Get all lessons (elective and non-elective) for a teacher
     SELECT
         s.id,
         s.day_of_week,
         s.timeslot_id,
         s.lesson_display_name,
         c.name as class_name,
-        sub.name as subject_name, -- The specific subject for the teacher
         s.is_double,
-        s.is_elective
+        s.is_elective,
+        eg.name as elective_group_name
     FROM schedules s
     JOIN schedule_teachers st ON s.id = st.schedule_id
     LEFT JOIN classes c ON s.class_id = c.id
-    -- Find the specific subject this teacher teaches to this class from workloads
-    LEFT JOIN workloads w ON st.teacher_id = w.teacher_id AND s.class_id = w.class_id
-    LEFT JOIN subjects sub ON w.subject_id = sub.id
+    LEFT JOIN elective_groups eg ON s.elective_group_id = eg.id
     WHERE st.teacher_id = :teacher_id
     ORDER BY s.day_of_week, s.timeslot_id
     ";
@@ -39,6 +38,7 @@ function get_teacher_schedule($pdo, $teacher_id) {
     $stmt->execute([':teacher_id' => $teacher_id]);
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
+
 
 // --- Main Logic ---
 $pdoconn = db();
@@ -79,11 +79,6 @@ if ($selected_teacher_id) {
         }
     }
     $teacher_schedule_raw = get_teacher_schedule($pdoconn, $selected_teacher_id);
-    
-    // Gemini: Log the data for debugging
-    error_log("--- Teacher Timetable Debug ---");
-    error_log("Selected Teacher ID: " . print_r($selected_teacher_id, true));
-    error_log("Raw schedule data from DB: " . print_r($teacher_schedule_raw, true));
 }
 
 // Organize schedule for easy display
@@ -105,9 +100,7 @@ foreach ($teacher_schedule_raw as $lesson) {
         $period_idx = $timeslot_id_to_period_idx[$lesson['timeslot_id']];
         
         if (isset($teacher_timetable_by_period[$day_idx][$period_idx])) {
-            // This slot is already filled, potentially by a multi-class elective.
-            // Create an array if it's not already one.
-            if (!is_array($teacher_timetable_by_period[$day_idx][$period_idx])) {
+            if (!is_array($teacher_timetable_by_period[$day_idx][$period_idx]) || !isset($teacher_timetable_by_period[$day_idx][$period_idx][0])) {
                 $teacher_timetable_by_period[$day_idx][$period_idx] = [$teacher_timetable_by_period[$day_idx][$period_idx]];
             }
             $teacher_timetable_by_period[$day_idx][$period_idx][] = $lesson;
@@ -115,21 +108,19 @@ foreach ($teacher_schedule_raw as $lesson) {
             $teacher_timetable_by_period[$day_idx][$period_idx] = $lesson;
         }
 
-        if (!empty($lesson['is_double']) && isset($teacher_timetable_by_period[$day_idx][$period_idx + 1])) {
-            if (isset($teacher_timetable_by_period[$day_idx][$period_idx + 1])) {
-                 if (!is_array($teacher_timetable_by_period[$day_idx][$period_idx + 1])) {
-                    $teacher_timetable_by_period[$day_idx][$period_idx + 1] = [$teacher_timetable_by_period[$day_idx][$period_idx + 1]];
+        if (!empty($lesson['is_double']) && isset($non_break_periods[$period_idx + 1])) {
+            $next_period_idx = $period_idx + 1;
+            if (isset($teacher_timetable_by_period[$day_idx][$next_period_idx])) {
+                 if (!is_array($teacher_timetable_by_period[$day_idx][$next_period_idx]) || !isset($teacher_timetable_by_period[$day_idx][$next_period_idx][0])) {
+                    $teacher_timetable_by_period[$day_idx][$next_period_idx] = [$teacher_timetable_by_period[$day_idx][$next_period_idx]];
                 }
-                $teacher_timetable_by_period[$day_idx][$period_idx + 1][] = $lesson;
+                $teacher_timetable_by_period[$day_idx][$next_period_idx][] = $lesson;
             } else {
-                 $teacher_timetable_by_period[$day_idx][$period_idx + 1] = $lesson;
+                 $teacher_timetable_by_period[$day_idx][$next_period_idx] = $lesson;
             }
         }
     }
 }
-
-// Gemini: Log the final structure
-error_log("Final teacher_timetable_by_period structure: " . print_r($teacher_timetable_by_period, true));
 
 ?>
 <!DOCTYPE html>
@@ -196,7 +187,6 @@ error_log("Final teacher_timetable_by_period structure: " . print_r($teacher_tim
                                 $period_indices = array_keys($non_break_periods);
                                 foreach ($period_indices as $period_idx) {
                                     $current_timeslot_id = $non_break_periods[$period_idx]['id'];
-                                    // Find the full timeslot info, including breaks
                                     $timeslot_info = null;
                                     foreach ($timeslots as $ts) {
                                         if ($ts['id'] === $current_timeslot_id) {
@@ -205,9 +195,8 @@ error_log("Final teacher_timetable_by_period structure: " . print_r($teacher_tim
                                         }
                                     }
 
-                                    // Find if there is a break before this timeslot
                                     $break_html = '';
-                                    $last_period_end_time = null;
+                                    $last_period_end_time = '00:00:00';
                                     if ($period_idx > 0) {
                                         $prev_period_id = $non_break_periods[$period_idx - 1]['id'];
                                         foreach($timeslots as $ts) {
@@ -236,22 +225,54 @@ error_log("Final teacher_timetable_by_period structure: " . print_r($teacher_tim
                                         <?php foreach ($days_of_week as $day_idx => $day): ?>
                                             <td class="timetable-slot align-middle">
                                                 <?php
-                                                $lesson = $teacher_timetable_by_period[$day_idx][$period_idx] ?? null;
-                                                if ($lesson) {
-                                                    // If it's an array of lessons (co-teaching), display them all
-                                                    $lessons_to_display = is_array($lesson) && !isset($lesson['id']) ? $lesson : [$lesson];
+                                                $lesson_data = $teacher_timetable_by_period[$day_idx][$period_idx] ?? null;
+                                                if ($lesson_data) {
+                                                    $lessons_to_display = (is_array($lesson_data) && isset($lesson_data[0])) ? $lesson_data : [$lesson_data];
+                                                    
+                                                    $lessons_by_group = [];
                                                     foreach ($lessons_to_display as $single_lesson) {
-                                                        if ($single_lesson) { // Check not null
-                                                            $display_name = $single_lesson['lesson_display_name'];
-                                                            // For electives, the teacher should see their specific subject.
-                                                            if (!empty($single_lesson['is_elective']) && !empty($single_lesson['subject_name'])) {
-                                                                $display_name = $single_lesson['subject_name'];
+                                                        if ($single_lesson) {
+                                                            if (!empty($single_lesson['is_elective'])) {
+                                                                $group_name = $single_lesson['elective_group_name'];
+                                                                if (empty($group_name) && !empty($single_lesson['lesson_display_name'])) {
+                                                                    $parts = explode(' / ', $single_lesson['lesson_display_name']);
+                                                                    $group_name = $parts[0];
+                                                                }
+                                                                if (empty($group_name)) {
+                                                                    $group_name = 'Elective';
+                                                                }
+                                                                
+                                                                if (!isset($lessons_by_group[$group_name])) {
+                                                                    $lessons_by_group[$group_name] = [
+                                                                        'is_elective' => true,
+                                                                        'classes' => []
+                                                                    ];
+                                                                }
+                                                                if (!empty($single_lesson['class_name'])) {
+                                                                    $lessons_by_group[$group_name]['classes'][] = $single_lesson['class_name'];
+                                                                }
+                                                            } else {
+                                                                $display_subject = $single_lesson['lesson_display_name'];
+                                                                if (!isset($lessons_by_group[$display_subject])) {
+                                                                    $lessons_by_group[$display_subject] = [
+                                                                        'is_elective' => false,
+                                                                        'classes' => []
+                                                                    ];
+                                                                }
+                                                                if (!empty($single_lesson['class_name'])) {
+                                                                    $lessons_by_group[$display_subject]['classes'][] = $single_lesson['class_name'];
+                                                                }
                                                             }
-                                                            echo '<div class="lesson p-1 mb-1">';
-                                                            echo '<strong>' . htmlspecialchars($display_name) . '</strong><br>';
-                                                            echo '<small>' . htmlspecialchars($single_lesson['class_name']) . '</small>';
-                                                            echo '</div>';
                                                         }
+                                                    }
+
+                                                    foreach ($lessons_by_group as $name => $data) {
+                                                        echo '<div class="lesson p-1 mb-1">';
+                                                        echo '<strong>' . htmlspecialchars($name) . '</strong><br>';
+                                                        if (!empty($data['classes'])) {
+                                                            echo '<small>' . htmlspecialchars(implode(', ', array_unique($data['classes']))) . '</small>';
+                                                        }
+                                                        echo '</div>';
                                                     }
                                                 }
                                                 ?>
@@ -260,7 +281,6 @@ error_log("Final teacher_timetable_by_period structure: " . print_r($teacher_tim
                                     </tr>
                                 <?php
                                 }
-                                // Check for any breaks at the very end of the day
                                 $last_timeslot_end_time = end($non_break_periods)['end_time'];
                                 $final_break_html = '';
                                 foreach ($timeslots as $ts) {
@@ -279,7 +299,11 @@ error_log("Final teacher_timetable_by_period structure: " . print_r($teacher_tim
                 </div>
                 </div>
             <?php elseif ($selected_teacher_id): ?>
-                <div class="alert alert-info">No lessons scheduled for this teacher.</div>
+                <div class="alert alert-info">No lessons are scheduled for you at the moment.</div>
+            <?php else: ?>
+                 <?php if ($role === 'admin'): ?>
+                <div class="alert alert-info">Please select a teacher to view their timetable.</div>
+                <?php endif; ?>
             <?php endif; ?>
         </div>
     </div>
