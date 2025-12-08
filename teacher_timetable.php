@@ -270,7 +270,21 @@ foreach ($teacher_schedule_raw as $lesson) {
                                                         echo '<div class="lesson p-1 mb-1">';
                                                         echo '<strong>' . htmlspecialchars($name) . '</strong><br>';
                                                         if (!empty($data['classes'])) {
-                                                            echo '<small>' . htmlspecialchars(implode(', ', array_unique($data['classes']))) . '</small>';
+                                                            $class_names_to_display = $data['classes'];
+                                                            if ($data['is_elective']) {
+                                                                $processed_classes = [];
+                                                                foreach ($data['classes'] as $class_name) {
+                                                                    // Extracts "Grade X" from "Grade X Y"
+                                                                    $parts = explode(' ', $class_name);
+                                                                    if (count($parts) > 2) {
+                                                                        $processed_classes[] = $parts[0] . ' ' . $parts[1];
+                                                                    } else {
+                                                                        $processed_classes[] = $class_name;
+                                                                    }
+                                                                }
+                                                                $class_names_to_display = array_unique($processed_classes);
+                                                            }
+                                                            echo '<small>' . htmlspecialchars(implode(', ', $class_names_to_display)) . '</small>';
                                                         }
                                                         echo '</div>';
                                                     }
